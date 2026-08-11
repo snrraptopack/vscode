@@ -37,7 +37,7 @@ Acceptance criteria:
 - The lesson editor survives workbench reload through serialization.
 - Timeline actions update one authoritative clock.
 
-Current vertical-slice note: the lesson editor is a native transport and session-state shell. It deliberately does not simulate code playback; Milestone 2 will drive real text models and editor inputs from recorded events. Persisted resume metadata moves to the package/checkpoint slice, where its schema can be versioned with the session.
+Current vertical-slice note: the lesson editor now hosts the Milestone 2 recording-backed Monaco models, file navigation, and transport directly in its native center surface. Persisted resume metadata still moves to the package/checkpoint slice, where its schema can be versioned with the session.
 
 ## Milestone 2: Deterministic editor playback
 
@@ -49,13 +49,19 @@ Status: in progress.
 - [x] Record workspace file additions, updates, and deletions alongside editor events.
 - [x] Apply incremental model edits through isolated native Monaco models.
 - [x] Lazily materialize checkpoint and newly created text files without consulting the instructor's current disk.
-- [x] Open replay resources and restore selections through `IEditorService`.
+- [x] Route replay resources and restored selections exclusively through the native learner lesson surface.
 - [x] Add replay, stop, and restart commands with native status feedback.
-- Make Replay enter the learner lesson experience before applying its first event.
-- Bind the lesson's native center editor to recording-backed virtual models instead of replacing the lesson surface.
-- Add a recording-backed file tree and creator comparison action inside the learner experience.
+- [x] Make Replay enter the learner lesson experience before applying its first event.
+- [x] Bind the lesson's native center editor to recording-backed virtual models instead of replacing the lesson surface.
+- [x] Add a recording-backed file tree and native multi-file tabs inside the learner experience.
+- [x] Add arbitrary seek from the starting checkpoint.
+- [x] Pause playback when the learner inspects another replay file, then return to the instructor's active file on resume.
+- [x] Capture authoritative post-edit text anchors so intermediate reconstruction cannot drift from the instructor text.
+- Add a creator comparison action inside the learner experience.
 - Persist checkpoints and event chunks in a portable package.
-- Add arbitrary seek from a checkpoint.
+- Add indexed intermediate checkpoints so long seeks do not replay from time zero.
+- Capture normalized diagnostic/marker snapshots on the session clock for deterministic squiggles and Problems state.
+- Keep captured instructor diagnostics separate from optional live diagnostics produced by a future learner sandbox.
 - Pause before a learner edit is overwritten.
 - Store learner changes as an overlay.
 
@@ -66,7 +72,7 @@ Acceptance criteria:
 - Replay writes are not captured as learner events.
 - A short native recording can be replayed without changing its final file contents or event ordering.
 
-Current vertical-slice note: record, stop, replay, stop replay, and restart replay now work for workspace and editor events during one product process. The starting tree captures portable file bytes under explicit safety limits; later additions, updates, and deletions are timeline events. Replay uses a separate URI scheme, does not consult files that the instructor later changes or deletes, and cannot save into the recorded workspace. The next slice moves that working replay target into the native learner lesson experience and adds its browsable virtual tree. Draft persistence, seek, learner edits during replay, and non-editor domains are intentionally not claimed yet.
+Current vertical-slice note: record, stop, learner preview, play, pause, arbitrary seek, restart, manual file inspection, and deterministic resume now work for workspace and editor events during one product process. The starting tree captures portable file bytes under explicit safety limits; later additions, updates, deletions, active files, selections, and authoritative post-edit text anchors are timeline events. Replay owns isolated Monaco models in the native learner surface, exposes a themed virtual tree and multi-file tabs, does not consult files that the instructor later changes or deletes, and cannot save into the creator workspace. Draft persistence, indexed checkpoints, captured diagnostics, learner edits/overlays, and non-editor domains are intentionally not claimed yet.
 
 ## Milestone 3: Native browser integration
 

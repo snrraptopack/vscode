@@ -37,9 +37,12 @@ The current native slice provides:
 - native editor recording for text edits, active files, selections, and saves;
 - an immutable starting checkpoint for every document touched during recording;
 - a bounded immutable workspace-tree snapshot with recorded file lifecycle changes;
-- isolated replay through real Monaco models without modifying workspace files; and
+- isolated replay through real Monaco models without modifying workspace files;
+- a native learner-preview surface with a themed virtual file tree and multi-file tabs;
+- deterministic timeline scrubbing while paused or playing;
+- automatic pause for manual file inspection and return to the instructor's active file on resume; and
 - focused unit tests for playback, recording-clock, checkpoint, and replay-cursor transitions.
 
-Recording is started and stopped through native CodeScrim commands. While active, a normal VS Code status-bar entry shows the captured event count and stops the recording when clicked. `CodeScrim: Replay Last Recording` then opens isolated native editor models and applies the recorded events on their original monotonic timeline. Replay status can stop or restart the run.
+Recording is started and stopped through native CodeScrim commands. While active, a normal VS Code status-bar entry shows the captured event count and stops the recording when clicked. `CodeScrim: Replay Last Recording` opens the native learner experience, reconstructs isolated editor models, and applies the recorded events on their original monotonic timeline. Replay status can stop or restart the run.
 
-This is an in-memory workspace/editor vertical slice: restarting the product discards the draft, and terminal, browser, debugger, narration, persisted packages, seeking, a virtual file explorer, learner overlays, and sandboxed learner execution remain on the roadmap. Passive replay never executes recorded code or commands.
+This is an in-memory workspace/editor vertical slice: restarting the product discards the draft, and terminal, browser, debugger, narration, persisted packages, captured diagnostics, learner overlays, and sandboxed learner execution remain on the roadmap. Passive replay never executes recorded code or commands. Replay currently provides syntax tokenization from the recorded language ID, but deterministic lint/type squiggles require the planned diagnostic event track rather than rerunning the instructor's language server against virtual models.

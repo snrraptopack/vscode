@@ -16,7 +16,7 @@ import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer } from '../
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService } from '../common/codeScrimRecording.js';
-import { CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID, CODE_SCRIM_RESTART_REPLAY_COMMAND_ID, CODE_SCRIM_STOP_REPLAY_COMMAND_ID, ICodeScrimReplayService } from '../common/codeScrimReplay.js';
+import { CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID, CODE_SCRIM_RESTART_REPLAY_COMMAND_ID, CODE_SCRIM_RESUME_REPLAY_COMMAND_ID, CODE_SCRIM_STOP_REPLAY_COMMAND_ID, ICodeScrimReplayService } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, CODE_SCRIM_OPEN_DEMO_LESSON_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimLessonDescriptor, ICodeScrimSessionService } from '../common/codeScrimSession.js';
 import { CodeScrimCourseEditor } from './codeScrimCourseEditor.js';
 import { CodeScrimCourseEditorInput } from './codeScrimCourseEditorInput.js';
@@ -144,6 +144,8 @@ registerAction2(class extends Action2 {
 		const recorderService = accessor.get(ICodeScrimRecorderService);
 		const replayService = accessor.get(ICodeScrimReplayService);
 		const notificationService = accessor.get(INotificationService);
+		const editorService = accessor.get(IEditorService);
+		const instantiationService = accessor.get(IInstantiationService);
 		if (recorderService.state.status !== 'idle') {
 			notificationService.info(localize('codeScrim.stopRecordingBeforeReplay', "Stop the active CodeScrim recording before replaying it."));
 			return;
@@ -155,6 +157,13 @@ registerAction2(class extends Action2 {
 			return;
 		}
 
+		const previewLesson: ICodeScrimLessonDescriptor = {
+			id: `recording-preview-${draft.id}`,
+			title: localize('codeScrim.recordingPreviewTitle', "Recording Preview"),
+			description: localize('codeScrim.recordingPreviewDescription', "Preview this recording through the learner lesson experience."),
+			duration: Math.ceil(draft.duration / 1000),
+		};
+		await editorService.openEditor(instantiationService.createInstance(CodeScrimLessonEditorInput, previewLesson), { pinned: true });
 		if (await replayService.replay(draft)) {
 			notificationService.info(localize('codeScrim.replayStarted', "Replaying the last CodeScrim recording in isolated editor models."));
 		}
@@ -173,6 +182,21 @@ registerAction2(class extends Action2 {
 
 	run(accessor: ServicesAccessor): void {
 		accessor.get(ICodeScrimReplayService).stop();
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: CODE_SCRIM_RESUME_REPLAY_COMMAND_ID,
+			title: localize2('codeScrim.resumeReplay', "Resume Replay"),
+			category: localize2('codeScrim.category', "CodeScrim"),
+			f1: true,
+		});
+	}
+
+	run(accessor: ServicesAccessor): void {
+		accessor.get(ICodeScrimReplayService).resume();
 	}
 });
 

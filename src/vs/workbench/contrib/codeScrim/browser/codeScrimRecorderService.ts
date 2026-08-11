@@ -200,6 +200,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 				resource,
 				versionId: event.versionId,
 				eol: event.eol,
+				text: model.getValue(),
 				changes: event.changes.map(change => ({
 					rangeOffset: change.rangeOffset,
 					rangeLength: change.rangeLength,

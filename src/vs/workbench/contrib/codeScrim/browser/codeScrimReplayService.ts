@@ -4,10 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { mainWindow } from '../../../../base/browser/window.js';
+import { Sequencer } from '../../../../base/common/async.js';
 import { decodeBase64 } from '../../../../base/common/buffer.js';
 import { getErrorMessage, onUnexpectedError } from '../../../../base/common/errors.js';
 import { Emitter } from '../../../../base/common/event.js';
-import { Disposable, DisposableMap, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, IDisposable, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ICodeEditorService } from '../../../../editor/browser/services/codeEditorService.js';
 import { Range } from '../../../../editor/common/core/range.js';
@@ -15,39 +16,54 @@ import { Selection } from '../../../../editor/common/core/selection.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
 import { EndOfLineSequence, ITextModel } from '../../../../editor/common/model.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
-import { ITextModelContentProvider, ITextModelService } from '../../../../editor/common/services/resolverService.js';
 import { localize } from '../../../../nls.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
-import { CodeScrimReplayCursor, CodeScrimReplayState, CODE_SCRIM_RESTART_REPLAY_COMMAND_ID, CODE_SCRIM_STOP_REPLAY_COMMAND_ID, ICodeScrimReplayService } from '../common/codeScrimReplay.js';
+import { CodeScrimReplayCursor, CodeScrimReplayState, CODE_SCRIM_RESTART_REPLAY_COMMAND_ID, CODE_SCRIM_RESUME_REPLAY_COMMAND_ID, CODE_SCRIM_STOP_REPLAY_COMMAND_ID, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 
 const CODE_SCRIM_REPLAY_SCHEME = 'codescrim-replay';
 const REPLAY_TICK_INTERVAL = 16;
 
-export class CodeScrimReplayService extends Disposable implements ICodeScrimReplayService, ITextModelContentProvider {
+export class CodeScrimReplayService extends Disposable implements ICodeScrimReplayService {
 
 	declare readonly _serviceBrand: undefined;
 
 	private readonly cursor = new CodeScrimReplayCursor();
-	private readonly modelReferences = this._register(new DisposableMap<string>());
+	private readonly operations = new Sequencer();
+	private readonly models = this._register(new DisposableMap<string, ITextModel>());
 	private readonly timer = this._register(new MutableDisposable());
 	private readonly replayStatus = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
 	private readonly documentsByResource = new Map<string, ICodeScrimDocumentCheckpoint>();
 	private readonly entriesByResource = new Map<string, ICodeScrimWorkspaceEntryCheckpoint>();
 	private readonly urisByResource = new Map<string, URI>();
-	private readonly resourcesByUri = new Map<string, ICodeScrimWorkspaceResource>();
 	private _state: CodeScrimReplayState = Object.freeze({ status: 'idle' });
 	private activeDraft: ICodeScrimRecordingDraft | undefined;
+	private replayWorkspaceVersion = 0;
 	private startedAt = 0;
 	private ticking = false;
+	private timerTickQueued = false;
+	private operationVersion = 0;
+	private surface: ICodeScrimReplaySurface | undefined;
+	private _activeResource: ICodeScrimWorkspaceResource | undefined;
+	private replayActiveResource: ICodeScrimWorkspaceResource | undefined;
 	private pendingActiveResource: ICodeScrimWorkspaceResource | undefined;
 	private readonly _onDidChangeState = this._register(new Emitter<CodeScrimReplayState>());
 	readonly onDidChangeState = this._onDidChangeState.event;
+	private readonly _onDidChangeWorkspace = this._register(new Emitter<void>());
+	readonly onDidChangeWorkspace = this._onDidChangeWorkspace.event;
 
 	get state(): CodeScrimReplayState {
 		return this._state;
+	}
+
+	get workspaceEntries(): readonly ICodeScrimWorkspaceEntryCheckpoint[] {
+		return [...this.entriesByResource.values()].sort((left, right) => left.resource.root - right.resource.root || left.resource.path.localeCompare(right.resource.path));
+	}
+
+	get activeResource(): ICodeScrimWorkspaceResource | undefined {
+		return this._activeResource;
 	}
 
 	constructor(
@@ -57,92 +73,208 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		@IModelService private readonly modelService: IModelService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
-		@ITextModelService private readonly textModelService: ITextModelService,
 	) {
 		super();
-		this._register(this.textModelService.registerTextModelContentProvider(CODE_SCRIM_REPLAY_SCHEME, this));
 	}
 
 	async replay(draft: ICodeScrimRecordingDraft): Promise<boolean> {
-		this.stop();
-		await this.closeReplayEditors();
-		this.modelReferences.clearAndDisposeAll();
-		this.activeDraft = draft;
-		this.publish('preparing', 0);
-
-		try {
-			this.prepareWorkspace(draft);
-			await this.startPreparedReplay(draft);
-			return true;
-		} catch (error) {
-			this.handleReplayError(error);
-			return false;
-		}
+		const operation = ++this.operationVersion;
+		this.timer.clear();
+		return this.operations.queue(() => this.doReplay(draft, operation));
 	}
 
 	async restart(): Promise<boolean> {
-		const draft = this.activeDraft;
-		if (!draft) {
-			return false;
-		}
-
+		const operation = ++this.operationVersion;
 		this.timer.clear();
-		this.publish('preparing', 0);
-		try {
-			await this.closeReplayEditors();
-			this.modelReferences.clearAndDisposeAll();
-			this.prepareWorkspace(draft);
-			await this.startPreparedReplay(draft);
-			return true;
-		} catch (error) {
-			this.handleReplayError(error);
-			return false;
-		}
+		return this.operations.queue(() => this.doRestart(operation));
+	}
+
+	async seek(position: number): Promise<void> {
+		const operation = ++this.operationVersion;
+		this.timer.clear();
+		await this.operations.queue(() => this.doSeek(position, operation));
+	}
+
+	async pause(): Promise<void> {
+		const operation = ++this.operationVersion;
+		this.timer.clear();
+		await this.operations.queue(() => this.doPause(operation));
+	}
+
+	resume(): void {
+		const operation = ++this.operationVersion;
+		this.timer.clear();
+		void this.operations.queue(() => this.doResume(operation));
 	}
 
 	stop(): void {
+		this.operationVersion++;
 		this.timer.clear();
 		this.ticking = false;
 		this.publishIdle();
 	}
 
-	async provideTextContent(resource: URI): Promise<ITextModel | null> {
-		const existing = this.modelService.getModel(resource);
-		if (existing && !existing.isDisposed()) {
-			return existing;
+	async openResource(resource: ICodeScrimWorkspaceResource): Promise<void> {
+		const operation = ++this.operationVersion;
+		const pauseForInspection = this._state.status === 'playing';
+		if (pauseForInspection) {
+			this.timer.clear();
+		}
+		await this.operations.queue(async () => {
+			if (!this.isCurrentOperation(operation)) {
+				return;
+			}
+			if (pauseForInspection) {
+				await this.doPause(operation);
+			}
+			await this.showResource(resource, operation);
+		});
+	}
+
+	attachSurface(surface: ICodeScrimReplaySurface): IDisposable {
+		this.surface = surface;
+		const activeResource = this._activeResource;
+		const activeModel = activeResource && this.getModel(activeResource);
+		if (activeResource && activeModel) {
+			surface.openResource(activeResource, activeModel);
+		}
+		return toDisposable(() => {
+			if (this.surface === surface) {
+				this.surface = undefined;
+			}
+		});
+	}
+
+	private async doReplay(draft: ICodeScrimRecordingDraft, operation: number): Promise<boolean> {
+		if (!this.isCurrentOperation(operation)) {
+			return false;
 		}
 
-		const workspaceResource = this.resourcesByUri.get(resource.toString());
-		if (!workspaceResource) {
-			return null;
+		try {
+			await this.closeReplayEditors();
+			if (!this.isCurrentOperation(operation)) {
+				return false;
+			}
+			this.surface?.clear();
+			this.models.clearAndDisposeAll();
+			this.activeDraft = draft;
+			this.publish('preparing', 0);
+			this.prepareWorkspace(draft);
+			await this.startPreparedReplay(draft, operation);
+			return this.isCurrentOperation(operation);
+		} catch (error) {
+			if (this.isCurrentOperation(operation)) {
+				this.handleReplayError(error);
+			}
+			return false;
 		}
-		const key = CodeScrimRecordingBuffer.resourceKey(workspaceResource);
-		const document = this.documentsByResource.get(key);
-		const entry = this.entriesByResource.get(key);
-		if (!document && (!entry || entry.type !== 'file' || !entry.text || entry.contents === undefined)) {
-			return null;
-		}
-		const text = document?.text ?? decodeBase64(entry!.contents!).toString();
-		const language = document
-			? this.languageService.createById(document.languageId)
-			: this.languageService.createByFilepathOrFirstLine(resource, text.split(/\r?\n/, 1)[0]);
+	}
 
-		// Passive instructor replay must not be presented to extension-host language services as an
-		// editable workspace document. The model still uses the recorded language for native syntax
-		// highlighting, while this flag keeps virtual replay paths out of extension synchronization.
-		const model = this.modelService.createModel(text, language, resource, true);
-		if (document) {
-			model.setEOL(document.eol === '\r\n' ? EndOfLineSequence.CRLF : EndOfLineSequence.LF);
+	private async doRestart(operation: number): Promise<boolean> {
+		const draft = this.activeDraft;
+		if (!draft || !this.isCurrentOperation(operation)) {
+			return false;
 		}
-		return model;
+
+		this.publish('preparing', 0);
+		try {
+			await this.closeReplayEditors();
+			if (!this.isCurrentOperation(operation)) {
+				return false;
+			}
+			this.surface?.clear();
+			this.models.clearAndDisposeAll();
+			this.prepareWorkspace(draft);
+			await this.startPreparedReplay(draft, operation);
+			return this.isCurrentOperation(operation);
+		} catch (error) {
+			if (this.isCurrentOperation(operation)) {
+				this.handleReplayError(error);
+			}
+			return false;
+		}
+	}
+
+	private async doSeek(position: number, operation: number): Promise<void> {
+		const draft = this.activeDraft;
+		if (!draft || this._state.status === 'idle' || !this.isCurrentOperation(operation)) {
+			return;
+		}
+
+		const target = Math.min(draft.duration, Math.max(0, Math.round(position)));
+		const resumeAfterSeek = this._state.status === 'playing';
+		this.publish('preparing', target);
+		try {
+			await this.closeReplayEditors();
+			if (!this.isCurrentOperation(operation)) {
+				return;
+			}
+			this.surface?.clear();
+			this.models.clearAndDisposeAll();
+			this.prepareWorkspace(draft);
+			this.cursor.reset(draft.events);
+			const initialResource = this.getInitialResource(draft);
+			if (initialResource) {
+				await this.activateReplayResource(initialResource, operation);
+			}
+			for (const event of this.cursor.advance(target)) {
+				if (!this.isCurrentOperation(operation)) {
+					return;
+				}
+				await this.applyEvent(event, operation);
+			}
+			if (!this.isCurrentOperation(operation)) {
+				return;
+			}
+			this.startedAt = this.now() - target / 1000;
+			this.publish(target >= draft.duration ? 'ended' : resumeAfterSeek ? 'playing' : 'paused', target);
+			if (resumeAfterSeek && target < draft.duration) {
+				this.startTimer(operation);
+			}
+		} catch (error) {
+			if (this.isCurrentOperation(operation)) {
+				this.handleReplayError(error);
+			}
+		}
+	}
+
+	private async doPause(operation: number): Promise<void> {
+		if (this._state.status !== 'playing' || !this.isCurrentOperation(operation)) {
+			return;
+		}
+
+		await this.tick(operation);
+		if (this._state.status === 'playing' && this.isCurrentOperation(operation)) {
+			this.timer.clear();
+			this.publish('paused', this._state.position);
+		}
+	}
+
+	private async doResume(operation: number): Promise<void> {
+		if (this._state.status !== 'paused' || !this.isCurrentOperation(operation)) {
+			return;
+		}
+
+		if (this.replayActiveResource) {
+			await this.showResource(this.replayActiveResource, operation);
+		}
+		if (!this.isCurrentOperation(operation) || this._state.status !== 'paused') {
+			return;
+		}
+		this.startedAt = this.now() - this._state.position / 1000;
+		this.publish('playing', this._state.position);
+		this.startTimer(operation);
 	}
 
 	private prepareWorkspace(draft: ICodeScrimRecordingDraft): void {
 		this.documentsByResource.clear();
 		this.entriesByResource.clear();
 		this.urisByResource.clear();
-		this.resourcesByUri.clear();
+		this.replayWorkspaceVersion++;
+		this._activeResource = undefined;
+		this.replayActiveResource = undefined;
 		this.pendingActiveResource = undefined;
+		this.surface?.clear();
 
 		for (const entry of draft.checkpoint.entries) {
 			const key = CodeScrimRecordingBuffer.resourceKey(entry.resource);
@@ -155,34 +287,55 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.documentsByResource.set(CodeScrimRecordingBuffer.resourceKey(document.resource), document);
 			this.registerResource(draft.id, document.resource);
 		}
+		this._onDidChangeWorkspace.fire();
 	}
 
-	private async startPreparedReplay(draft: ICodeScrimRecordingDraft): Promise<void> {
+	private async startPreparedReplay(draft: ICodeScrimRecordingDraft, operation: number): Promise<void> {
 		this.cursor.reset(draft.events);
-		const initialResource = draft.events.find(event => event.kind === 'editor.activeResourceChanged' && event.payload.resource)?.payload.resource
-			?? draft.checkpoint.documents[0]?.resource
-			?? draft.checkpoint.entries.find(entry => entry.type === 'file' && entry.text)?.resource;
+		const initialResource = this.getInitialResource(draft);
 		if (initialResource) {
-			await this.openResource(initialResource);
+			await this.activateReplayResource(initialResource, operation);
+		}
+		if (!this.isCurrentOperation(operation)) {
+			return;
 		}
 
 		this.startedAt = this.now();
 		this.publish('playing', 0);
-		await this.tick();
-		if (this._state.status !== 'playing') {
+		await this.tick(operation);
+		if (this._state.status !== 'playing' || !this.isCurrentOperation(operation)) {
 			return;
 		}
 
+		this.startTimer(operation);
+	}
+
+	private getInitialResource(draft: ICodeScrimRecordingDraft): ICodeScrimWorkspaceResource | undefined {
+		return draft.events.find(event => event.kind === 'editor.activeResourceChanged' && event.payload.resource)?.payload.resource
+			?? draft.checkpoint.documents[0]?.resource
+			?? draft.checkpoint.entries.find(entry => entry.type === 'file' && entry.text)?.resource;
+	}
+
+	private startTimer(operation: number): void {
+		if (!this.isCurrentOperation(operation)) {
+			return;
+		}
 		const handle = mainWindow.setInterval(() => {
-			void this.tick().catch(error => {
-				this.handleReplayError(error);
-			});
+			if (this.timerTickQueued || !this.isCurrentOperation(operation)) {
+				return;
+			}
+			this.timerTickQueued = true;
+			void this.operations.queue(() => this.tick(operation)).catch(error => {
+				if (this.isCurrentOperation(operation)) {
+					this.handleReplayError(error);
+				}
+			}).finally(() => this.timerTickQueued = false);
 		}, REPLAY_TICK_INTERVAL);
 		this.timer.value = toDisposable(() => mainWindow.clearInterval(handle));
 	}
 
-	private async tick(): Promise<void> {
-		if (this.ticking || this._state.status !== 'playing' || !this.activeDraft) {
+	private async tick(operation: number): Promise<void> {
+		if (this.ticking || this._state.status !== 'playing' || !this.activeDraft || !this.isCurrentOperation(operation)) {
 			return;
 		}
 
@@ -190,7 +343,13 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		try {
 			const position = Math.min(this.activeDraft.duration, Math.round((this.now() - this.startedAt) * 1000));
 			for (const event of this.cursor.advance(position)) {
-				await this.applyEvent(event);
+				if (!this.isCurrentOperation(operation)) {
+					return;
+				}
+				await this.applyEvent(event, operation);
+			}
+			if (!this.isCurrentOperation(operation)) {
+				return;
 			}
 			if (position >= this.activeDraft.duration && this.cursor.ended) {
 				this.timer.clear();
@@ -203,14 +362,14 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		}
 	}
 
-	private async applyEvent(event: CodeScrimRecordingEvent): Promise<void> {
+	private async applyEvent(event: CodeScrimRecordingEvent, operation: number): Promise<void> {
 		switch (event.kind) {
 			case 'workspace.entriesChanged':
-				await this.applyWorkspaceChanges(event.payload.deleted, event.payload.created);
+				await this.applyWorkspaceChanges(event.payload.deleted, event.payload.created, operation);
 				break;
 			case 'editor.activeResourceChanged':
 				if (event.payload.resource) {
-					await this.openResource(event.payload.resource);
+					await this.activateReplayResource(event.payload.resource, operation);
 				}
 				break;
 			case 'editor.documentChanged': {
@@ -218,16 +377,23 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				if (!model) {
 					break;
 				}
-				const edits = event.payload.changes.map(change => ({
-					range: Range.fromPositions(model.getPositionAt(change.rangeOffset), model.getPositionAt(change.rangeOffset + change.rangeLength)),
-					text: change.text,
-				}));
-				model.applyEdits(edits);
+				if (event.payload.text !== undefined) {
+					model.setValue(event.payload.text);
+				} else {
+					const edits = event.payload.changes.map(change => ({
+						range: Range.fromPositions(model.getPositionAt(change.rangeOffset), model.getPositionAt(change.rangeOffset + change.rangeLength)),
+						text: change.text,
+					}));
+					model.applyEdits(edits);
+				}
 				model.setEOL(event.payload.eol === '\r\n' ? EndOfLineSequence.CRLF : EndOfLineSequence.LF);
 				break;
 			}
 			case 'editor.selectionChanged': {
-				await this.openResource(event.payload.resource);
+				await this.activateReplayResource(event.payload.resource, operation);
+				if (!this.isCurrentOperation(operation)) {
+					break;
+				}
 				const editor = this.codeEditorService.getActiveCodeEditor();
 				if (editor?.getModel() === this.getModel(event.payload.resource)) {
 					editor.setSelections(event.payload.selections.map(selection => new Selection(
@@ -245,44 +411,71 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		}
 	}
 
-	private async openResource(resource: ICodeScrimWorkspaceResource): Promise<void> {
+	private async activateReplayResource(resource: ICodeScrimWorkspaceResource, operation: number): Promise<void> {
+		this.replayActiveResource = resource;
+		await this.showResource(resource, operation);
+	}
+
+	private async showResource(resource: ICodeScrimWorkspaceResource, operation: number): Promise<void> {
 		const model = await this.ensureModel(resource);
+		if (!this.isCurrentOperation(operation)) {
+			return;
+		}
+		this._activeResource = resource;
 		const uri = this.getUri(resource);
 		if (!uri || !model) {
 			this.pendingActiveResource = resource;
 			return;
 		}
 		this.pendingActiveResource = undefined;
-
-		if (this.codeEditorService.getActiveCodeEditor()?.getModel()?.uri.toString() !== uri.toString()) {
-			await this.editorService.openEditor({ resource: uri, options: { pinned: true } });
+		if (this.surface) {
+			this.surface.openResource(resource, model);
+			return;
 		}
+		// Replay is owned by the learner lesson surface. If that surface is not available, retain
+		// the intended active resource without leaking recorded files into the creator workbench.
+		this.pendingActiveResource = resource;
 	}
 
 	private getModel(resource: ICodeScrimWorkspaceResource): ITextModel | null {
-		const uri = this.getUri(resource);
-		return uri ? this.modelService.getModel(uri) : null;
+		const model = this.models.get(CodeScrimRecordingBuffer.resourceKey(resource));
+		return model && !model.isDisposed() ? model : null;
 	}
 
-	private async ensureModel(resource: ICodeScrimWorkspaceResource): Promise<ITextModel | null> {
+	private ensureModel(resource: ICodeScrimWorkspaceResource): ITextModel | null {
 		const key = CodeScrimRecordingBuffer.resourceKey(resource);
 		const uri = this.getUri(resource);
 		if (!uri) {
 			return null;
 		}
-		const existing = this.modelService.getModel(uri);
+		const existing = this.models.get(key);
 		if (existing && !existing.isDisposed()) {
 			return existing;
 		}
-		if (!this.modelReferences.has(key)) {
-			this.modelReferences.set(key, await this.textModelService.createModelReference(uri));
+
+		const document = this.documentsByResource.get(key);
+		const entry = this.entriesByResource.get(key);
+		if (!document && (!entry || entry.type !== 'file' || !entry.text || entry.contents === undefined)) {
+			return null;
 		}
-		return this.modelService.getModel(uri);
+		const text = document?.text ?? decodeBase64(entry!.contents!).toString();
+		const language = document
+			? this.languageService.createById(document.languageId)
+			: this.languageService.createByFilepathOrFirstLine(uri, text.split(/\r?\n/, 1)[0]);
+		const model = this.modelService.createModel(text, language, uri, true);
+		if (document) {
+			model.setEOL(document.eol === '\r\n' ? EndOfLineSequence.CRLF : EndOfLineSequence.LF);
+		}
+		this.models.set(key, model);
+		return model;
 	}
 
-	private async applyWorkspaceChanges(deleted: readonly ICodeScrimWorkspaceResource[], created: readonly ICodeScrimWorkspaceEntryCheckpoint[]): Promise<void> {
+	private async applyWorkspaceChanges(deleted: readonly ICodeScrimWorkspaceResource[], created: readonly ICodeScrimWorkspaceEntryCheckpoint[], operation: number): Promise<void> {
 		for (const resource of deleted) {
 			await this.removeResourceTree(resource);
+			if (!this.isCurrentOperation(operation)) {
+				return;
+			}
 		}
 
 		const draft = this.activeDraft;
@@ -303,8 +496,9 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		}
 
 		if (this.pendingActiveResource && this.getUri(this.pendingActiveResource)) {
-			await this.openResource(this.pendingActiveResource);
+			await this.showResource(this.pendingActiveResource, operation);
 		}
+		this._onDidChangeWorkspace.fire();
 	}
 
 	private async removeResourceTree(resource: ICodeScrimWorkspaceResource): Promise<void> {
@@ -322,18 +516,27 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		}
 
 		for (const key of keys) {
+			const removedResource = this.entriesByResource.get(key)?.resource ?? this.documentsByResource.get(key)?.resource;
 			const uri = this.urisByResource.get(key);
 			if (uri) {
 				const editors = this.editorService.findEditors(uri);
 				if (editors.length) {
 					await this.editorService.closeEditors(editors, { preserveFocus: true });
 				}
-				this.resourcesByUri.delete(uri.toString());
 			}
-			this.modelReferences.deleteAndDispose(key);
+			this.models.deleteAndDispose(key);
 			this.urisByResource.delete(key);
 			this.entriesByResource.delete(key);
 			this.documentsByResource.delete(key);
+			if (removedResource) {
+				this.surface?.closeResource(removedResource);
+			}
+		}
+		if (this._activeResource && keys.has(CodeScrimRecordingBuffer.resourceKey(this._activeResource))) {
+			this._activeResource = undefined;
+		}
+		if (this.replayActiveResource && keys.has(CodeScrimRecordingBuffer.resourceKey(this.replayActiveResource))) {
+			this.replayActiveResource = undefined;
 		}
 	}
 
@@ -344,7 +547,6 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		}
 		const uri = this.toReplayUri(draftId, resource);
 		this.urisByResource.set(key, uri);
-		this.resourcesByUri.set(uri.toString(), resource);
 	}
 
 	private async closeReplayEditors(): Promise<void> {
@@ -363,10 +565,11 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			scheme: CODE_SCRIM_REPLAY_SCHEME,
 			authority: draftId,
 			path: `/${resource.root}/${resource.path}`,
+			query: `workspace=${this.replayWorkspaceVersion}`,
 		});
 	}
 
-	private publish(status: 'preparing' | 'playing' | 'ended', position: number): void {
+	private publish(status: 'preparing' | 'playing' | 'paused' | 'ended', position: number): void {
 		if (!this.activeDraft) {
 			return;
 		}
@@ -418,12 +621,15 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 		const ended = this._state.status === 'ended';
 		const failed = this._state.status === 'error';
+		const paused = this._state.status === 'paused';
 		const entry = {
 			name: localize('codeScrim.replayStatusName', "CodeScrim Replay"),
 			text: failed
 				? '$(error) ' + localize('codeScrim.replayFailedStatus', "Replay failed")
 				: ended
 				? '$(debug-restart) ' + localize('codeScrim.replayCompleteStatus', "Replay complete")
+				: paused
+					? '$(debug-pause) ' + localize('codeScrim.replayPausedStatus', "Replay paused")
 				: this._state.status === 'preparing'
 					? '$(loading~spin) ' + localize('codeScrim.replayPreparingStatus', "Preparing replay")
 					: '$(play) ' + localize('codeScrim.replayStatusText', "Replaying · {0}/{1}", this._state.appliedEventCount, this._state.totalEventCount),
@@ -431,14 +637,18 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				? localize('codeScrim.replayFailedAriaLabel', "CodeScrim replay failed: {0}. Click to try again.", this._state.error ?? '')
 				: ended
 				? localize('codeScrim.replayCompleteAriaLabel', "CodeScrim replay complete. Click to replay again.")
+				: paused
+					? localize('codeScrim.replayPausedAriaLabel', "CodeScrim replay paused. Click to resume.")
 				: localize('codeScrim.replayStatusAriaLabel', "CodeScrim is replaying. {0} of {1} events applied. Click to stop.", this._state.appliedEventCount, this._state.totalEventCount),
 			tooltip: failed
 				? localize('codeScrim.retryReplayTooltip', "Retry CodeScrim replay: {0}", this._state.error ?? '')
 				: ended
 				? localize('codeScrim.replayAgainTooltip', "Replay the recording again")
+				: paused
+					? localize('codeScrim.resumeReplayTooltip', "Resume CodeScrim replay")
 				: localize('codeScrim.stopReplayTooltip', "Stop CodeScrim replay"),
 			kind: failed ? 'error' as const : ended ? 'prominent' as const : undefined,
-			command: failed || ended ? CODE_SCRIM_RESTART_REPLAY_COMMAND_ID : CODE_SCRIM_STOP_REPLAY_COMMAND_ID,
+			command: failed || ended ? CODE_SCRIM_RESTART_REPLAY_COMMAND_ID : paused ? CODE_SCRIM_RESUME_REPLAY_COMMAND_ID : CODE_SCRIM_STOP_REPLAY_COMMAND_ID,
 		};
 		if (this.replayStatus.value) {
 			this.replayStatus.value.update(entry);
@@ -449,5 +659,9 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 	private now(): number {
 		return mainWindow.performance.now();
+	}
+
+	private isCurrentOperation(operation: number): boolean {
+		return operation === this.operationVersion;
 	}
 }

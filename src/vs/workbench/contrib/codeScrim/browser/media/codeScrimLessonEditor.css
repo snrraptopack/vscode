@@ -34,7 +34,10 @@
 
 .codescrim-session-navigation[hidden],
 .codescrim-session-context[hidden],
-.codescrim-session-pane-reveal[hidden] {
+.codescrim-session-pane-reveal[hidden],
+.codescrim-session-course-pane[hidden],
+.codescrim-session-files-pane[hidden],
+.codescrim-session-course-progress-footer[hidden] {
 	display: none;
 }
 
@@ -89,8 +92,51 @@
 
 .codescrim-session-brand-home:hover,
 .codescrim-session-exit:hover,
-.codescrim-session-navigation-item:hover {
+.codescrim-session-navigation-item:hover,
+.codescrim-session-file:hover:not(:disabled) {
 	background: var(--vscode-list-hoverBackground);
+}
+
+.codescrim-session-navigation-switcher {
+	display: grid;
+	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size120);
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--vscode-spacing-size40);
+	border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.codescrim-session-navigation-mode {
+	display: flex;
+	height: 32px;
+	padding: 0 var(--vscode-spacing-size80);
+	align-items: center;
+	justify-content: center;
+	gap: var(--vscode-spacing-size60);
+	border: var(--vscode-strokeThickness) solid transparent;
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font-family: inherit;
+	font-size: var(--vscode-fontSize-body2);
+	cursor: pointer;
+}
+
+.codescrim-session-navigation-mode:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.codescrim-session-navigation-mode[aria-selected='true'] {
+	border-color: var(--vscode-focusBorder);
+	background: var(--vscode-list-inactiveSelectionBackground);
+	color: var(--vscode-list-inactiveSelectionForeground);
+}
+
+.codescrim-session-course-pane {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
 }
 
 .codescrim-session-primary-navigation {
@@ -210,6 +256,77 @@
 	border-top: 1px solid var(--vscode-panel-border);
 }
 
+.codescrim-session-files-pane {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+}
+
+.codescrim-session-files-header {
+	display: flex;
+	height: 42px;
+	padding: 0 var(--vscode-spacing-size160);
+	align-items: center;
+	border-bottom: 1px solid var(--vscode-panel-border);
+	color: var(--vscode-sideBarTitle-foreground);
+	font-size: var(--vscode-fontSize-label1);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.codescrim-session-files-tree {
+	min-height: 0;
+	overflow: auto;
+	padding: var(--vscode-spacing-size80);
+}
+
+.codescrim-session-file {
+	display: flex;
+	box-sizing: border-box;
+	width: 100%;
+	height: 28px;
+	padding-right: var(--vscode-spacing-size80);
+	align-items: center;
+	gap: var(--vscode-spacing-size60);
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-sideBar-foreground);
+	font-family: inherit;
+	font-size: var(--vscode-fontSize-body2);
+	text-align: left;
+	cursor: pointer;
+}
+
+.codescrim-session-file.active {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+}
+
+.codescrim-session-file:disabled {
+	opacity: 0.8;
+	cursor: default;
+}
+
+.codescrim-session-file span:last-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.codescrim-session-resource-icon {
+	width: 16px;
+	height: 16px;
+	flex: 0 0 auto;
+}
+
+.codescrim-session-files-empty {
+	margin: var(--vscode-spacing-size160);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+	line-height: 1.5;
+}
+
 .codescrim-session-progress-meta {
 	color: var(--vscode-descriptionForeground);
 	font-size: var(--vscode-fontSize-body2);
@@ -262,8 +379,8 @@
 
 .codescrim-session-pane-reveal {
 	position: absolute;
-	top: var(--vscode-spacing-size120);
-	z-index: 2;
+	top: 3px;
+	z-index: 4;
 	border-color: var(--vscode-widget-border);
 	background: var(--vscode-editorWidget-background);
 	box-shadow: 0 2px 8px var(--vscode-widget-shadow);
@@ -278,6 +395,7 @@
 }
 
 .codescrim-session-stage {
+	position: relative;
 	display: grid;
 	min-height: 0;
 	overflow: hidden;
@@ -285,7 +403,100 @@
 	background: var(--vscode-editor-background);
 }
 
+.codescrim-session-code-editor {
+	position: absolute;
+	top: 35px;
+	right: 0;
+	bottom: 0;
+	left: 0;
+}
+
+.codescrim-session-replay-tabs[hidden] + .codescrim-session-code-editor {
+	top: 0;
+}
+
+.codescrim-session-replay-tabs {
+	position: absolute;
+	box-sizing: border-box;
+	top: 0;
+	right: 0;
+	left: 0;
+	z-index: 2;
+	display: flex;
+	height: 35px;
+	overflow-x: auto;
+	overflow-y: hidden;
+	border-bottom: 1px solid var(--vscode-editorGroupHeader-tabsBorder);
+	background: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+.codescrim-session-workspace.navigation-collapsed .codescrim-session-replay-tabs {
+	padding-left: var(--vscode-spacing-size400);
+}
+
+.codescrim-session-workspace.context-collapsed .codescrim-session-replay-tabs {
+	padding-right: var(--vscode-spacing-size400);
+}
+
+.codescrim-session-replay-tab {
+	display: flex;
+	min-width: 120px;
+	max-width: 220px;
+	align-items: stretch;
+	border-right: 1px solid var(--vscode-tab-border);
+	background: var(--vscode-tab-inactiveBackground);
+	color: var(--vscode-tab-inactiveForeground);
+}
+
+.codescrim-session-replay-tab[aria-selected='true'] {
+	background: var(--vscode-tab-activeBackground);
+	color: var(--vscode-tab-activeForeground);
+}
+
+.codescrim-session-replay-tab-open,
+.codescrim-session-replay-tab-close {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+}
+
+.codescrim-session-replay-tab-open {
+	padding: 0 var(--vscode-spacing-size40) 0 var(--vscode-spacing-size100);
+	flex: 1;
+	gap: var(--vscode-spacing-size60);
+	font-family: inherit;
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.codescrim-session-replay-tab-open span:last-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.codescrim-session-replay-tab-close {
+	width: 28px;
+	justify-content: center;
+	opacity: 0;
+}
+
+.codescrim-session-replay-tab:hover .codescrim-session-replay-tab-close,
+.codescrim-session-replay-tab[aria-selected='true'] .codescrim-session-replay-tab-close,
+.codescrim-session-replay-tab-close:focus-visible {
+	opacity: 1;
+}
+
+.codescrim-session-replay-tab-close:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
 .codescrim-session-stage-play {
+	position: relative;
+	z-index: 1;
 	padding: var(--vscode-spacing-size120);
 	border: 0;
 	background: transparent;
@@ -303,6 +514,10 @@
 }
 
 .codescrim-lesson-editor[data-playback-status='playing'] .codescrim-session-stage-play {
+	display: none;
+}
+
+.codescrim-lesson-editor.has-replay-model .codescrim-session-stage-play {
 	display: none;
 }
 

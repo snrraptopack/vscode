@@ -4,17 +4,20 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Event } from '../../../../base/common/event.js';
+import { IDisposable } from '../../../../base/common/lifecycle.js';
+import { ITextModel } from '../../../../editor/common/model.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { CodeScrimRecordingEvent, ICodeScrimRecordingDraft } from './codeScrimRecording.js';
+import { CodeScrimRecordingEvent, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
 
 export const CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID = 'codescrim.replayLastRecording';
 export const CODE_SCRIM_RESTART_REPLAY_COMMAND_ID = 'codescrim.restartReplay';
+export const CODE_SCRIM_RESUME_REPLAY_COMMAND_ID = 'codescrim.resumeReplay';
 export const CODE_SCRIM_STOP_REPLAY_COMMAND_ID = 'codescrim.stopReplay';
 
 export type CodeScrimReplayState =
 	| { readonly status: 'idle' }
 	| {
-		readonly status: 'preparing' | 'playing' | 'ended' | 'error';
+		readonly status: 'preparing' | 'playing' | 'paused' | 'ended' | 'error';
 		readonly draftId: string;
 		readonly position: number;
 		readonly duration: number;
@@ -22,6 +25,12 @@ export type CodeScrimReplayState =
 		readonly totalEventCount: number;
 		readonly error?: string;
 	};
+
+export interface ICodeScrimReplaySurface {
+	openResource(resource: ICodeScrimWorkspaceResource, model: ITextModel): void;
+	closeResource(resource: ICodeScrimWorkspaceResource): void;
+	clear(): void;
+}
 
 /** Host-neutral cursor that releases recorded events in timestamp and sequence order. */
 export class CodeScrimReplayCursor {
@@ -67,9 +76,17 @@ export const ICodeScrimReplayService = createDecorator<ICodeScrimReplayService>(
 export interface ICodeScrimReplayService {
 	readonly _serviceBrand: undefined;
 	readonly state: CodeScrimReplayState;
+	readonly workspaceEntries: readonly ICodeScrimWorkspaceEntryCheckpoint[];
+	readonly activeResource: ICodeScrimWorkspaceResource | undefined;
 	readonly onDidChangeState: Event<CodeScrimReplayState>;
+	readonly onDidChangeWorkspace: Event<void>;
 
 	replay(draft: ICodeScrimRecordingDraft): Promise<boolean>;
 	restart(): Promise<boolean>;
+	seek(position: number): Promise<void>;
+	pause(): Promise<void>;
+	resume(): void;
 	stop(): void;
+	openResource(resource: ICodeScrimWorkspaceResource): Promise<void>;
+	attachSurface(surface: ICodeScrimReplaySurface): IDisposable;
 }

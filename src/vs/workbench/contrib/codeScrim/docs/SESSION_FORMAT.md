@@ -87,7 +87,9 @@ The first editor schema uses these version-1 event kinds:
 
 The first workspace schema uses `workspace.entriesChanged`. Its payload atomically removes zero or more portable workspace resources and introduces zero or more directory/file entries. File entries carry base64 bytes in the in-memory draft; the package writer will move those bytes into content-addressed blobs.
 
-Editor resources are represented by workspace-root index and normalized forward-slash relative path. Text changes preserve the model event's descending range-offset order. This initial draft schema stays in memory until the checkpoint and package writer can persist it atomically.
+Editor resources are represented by workspace-root index and normalized forward-slash relative path. Text changes preserve the model event's descending range-offset order. The current in-memory draft also stores the authoritative full document text after each edit as an integrity anchor. That prevents a damaged or stale incremental range from corrupting every later replay frame. The package writer will replace this per-edit duplication with content-addressed chunks and periodic text anchors/checkpoints while retaining the same deterministic recovery guarantee.
+
+Editor diagnostics are not part of the first draft schema. A later diagnostic track will capture normalized marker snapshots on the shared session clock so recorded squiggles and Problems state remain deterministic across machines and toolchain versions. Live diagnostics from a learner's editable sandbox will be a separate overlay and will never rewrite the captured instructor track.
 
 The in-memory recording draft includes a bounded snapshot of the starting workspace plus an initial document checkpoint for every workspace model already observed when recording begins. Workspace entries preserve directories and file bytes; document checkpoints additionally preserve unsaved text, language ID, version ID, and EOL sequence. Capture is first-write-wins: later edits never mutate the checkpoint used to restart replay.
 

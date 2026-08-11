@@ -65,6 +65,8 @@ export type CodeScrimEditorEvent =
 		readonly resource: ICodeScrimWorkspaceResource;
 		readonly versionId: number;
 		readonly eol: string;
+		/** Full post-edit text anchor. Optional only for replaying drafts recorded before it was introduced. */
+		readonly text?: string;
 		readonly changes: readonly ICodeScrimTextChange[];
 		readonly undoing: boolean;
 		readonly redoing: boolean;
