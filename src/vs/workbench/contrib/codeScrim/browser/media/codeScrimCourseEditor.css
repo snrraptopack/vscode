@@ -1,0 +1,123 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.codescrim-course-editor {
+	box-sizing: border-box;
+	overflow: auto;
+	background: var(--vscode-editor-background);
+	color: var(--vscode-editor-foreground);
+}
+
+.codescrim-course-shell {
+	box-sizing: border-box;
+	width: min(1120px, 100%);
+	margin: 0 auto;
+	padding: clamp(32px, 6vw, 72px);
+}
+
+.codescrim-course-hero {
+	max-width: 760px;
+}
+
+.codescrim-course-eyebrow {
+	margin: 0 0 12px;
+	color: var(--vscode-textLink-foreground);
+	font-size: var(--vscode-fontSize-label1);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.codescrim-course-hero h1 {
+	margin: 0;
+	font-size: clamp(30px, 5vw, 52px);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	letter-spacing: -0.025em;
+	line-height: 1.08;
+}
+
+.codescrim-course-intro {
+	max-width: 680px;
+	margin: 20px 0 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 16px;
+	line-height: 1.6;
+}
+
+.codescrim-course-principles {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 16px;
+	margin-top: var(--vscode-spacing-size400);
+}
+
+.codescrim-course-principle,
+.codescrim-course-empty {
+	box-sizing: border-box;
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: var(--vscode-cornerRadius-large);
+	background: var(--vscode-editorWidget-background);
+}
+
+.codescrim-course-principle {
+	min-height: 156px;
+	padding: var(--vscode-spacing-size240);
+}
+
+.codescrim-course-principle h2,
+.codescrim-course-library h2,
+.codescrim-course-empty h3 {
+	margin: 0;
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.codescrim-course-principle h2 {
+	font-size: 16px;
+}
+
+.codescrim-course-principle p,
+.codescrim-course-empty p {
+	margin: 12px 0 0;
+	color: var(--vscode-descriptionForeground);
+	line-height: 1.55;
+}
+
+.codescrim-course-library {
+	margin-top: var(--vscode-spacing-size400);
+}
+
+.codescrim-course-library > h2 {
+	font-size: 20px;
+}
+
+.codescrim-course-empty {
+	margin-top: 16px;
+	padding: 28px;
+	border-style: dashed;
+}
+
+.codescrim-course-empty h3 {
+	font-size: 15px;
+}
+
+.codescrim-course-empty-actions {
+	display: flex;
+	margin-top: 20px;
+}
+
+.codescrim-course-empty-actions .monaco-button {
+	width: auto;
+	min-width: 160px;
+}
+
+@media (max-width: 760px) {
+	.codescrim-course-principles {
+		grid-template-columns: 1fr;
+	}
+
+	.codescrim-course-principle {
+		min-height: auto;
+	}
+}
