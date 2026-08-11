@@ -78,6 +78,21 @@ Domains initially include:
 
 Domain payloads are discriminated unions. Arbitrary `unknown` payloads are accepted only at the package-validation boundary and normalized before entering the replay engine.
 
+The first editor schema uses these version-1 event kinds:
+
+- `editor.activeResourceChanged`;
+- `editor.documentChanged`;
+- `editor.selectionChanged`;
+- `editor.documentSaved`.
+
+The first workspace schema uses `workspace.entriesChanged`. Its payload atomically removes zero or more portable workspace resources and introduces zero or more directory/file entries. File entries carry base64 bytes in the in-memory draft; the package writer will move those bytes into content-addressed blobs.
+
+Editor resources are represented by workspace-root index and normalized forward-slash relative path. Text changes preserve the model event's descending range-offset order. This initial draft schema stays in memory until the checkpoint and package writer can persist it atomically.
+
+The in-memory recording draft includes a bounded snapshot of the starting workspace plus an initial document checkpoint for every workspace model already observed when recording begins. Workspace entries preserve directories and file bytes; document checkpoints additionally preserve unsaved text, language ID, version ID, and EOL sequence. Capture is first-write-wins: later edits never mutate the checkpoint used to restart replay.
+
+The current safety policy captures at most 5,000 entries, 2 MiB per file, and 64 MiB of file bytes per snapshot operation. Symbolic links and `.git`, `.hg`, `.svn`, and `node_modules` directory trees are skipped, and the skipped count is visible when recording starts. These are vertical-slice limits, not the final package policy. The persisted package will use content-addressed blobs, configurable inclusion rules, and validation before materialization.
+
 ## Checkpoints
 
 A checkpoint contains enough state to seek without replaying from time zero:
@@ -116,6 +131,8 @@ Before materialization, the package service validates:
 - signature when protected content requires one.
 
 Opening a lesson never automatically executes terminal commands, tasks, debug configurations, workspace scripts, or downloaded binaries. Executable actions require an explicit trust and learner interaction model.
+
+Passive replay and learner execution are separate capabilities. A replay package describes state and recorded presentation; it is not itself a sandbox. When secure execution is implemented, the learner's explicit run action will materialize a writable overlay into an environment whose actual isolation guarantees are declared by the host.
 
 ## Compatibility
 

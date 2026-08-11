@@ -67,3 +67,49 @@ An active lesson temporarily owns the editor area and hides unrelated workbench 
 Global split and layout actions are hidden for the duration of the lesson, and normal workbench parts cannot be reopened while the layout lease is active. Closing the lesson restores the user's prior workbench visibility and editor options.
 
 Reason: global workbench layout actions can split or squeeze the coordinated lesson workspace, while grouped or displaced rail controls make recovery ambiguous. A scoped lease preserves a focused bootcamp interface without permanently changing user settings.
+
+## CS-010: Recording uses the normal workbench
+
+Status: accepted.
+
+Creator recording does not open a simulated editor or a dedicated recording page. Native adapters observe the real workbench while the creator edits normally. A compact status-bar entry indicates that recording is active and provides the stop action.
+
+The first adapter records only resources inside an open workspace and serializes them as a workspace-root index plus a relative path. External absolute paths are not added to a draft.
+
+Reason: authoring should retain standard VS Code behavior, and portable session assets must not encode machine-specific paths.
+
+## CS-011: Editor replay is isolated from workspace files
+
+Status: accepted.
+
+The first replay implementation creates real Monaco models under a dedicated `codescrim-replay:` URI scheme from the immutable recording checkpoint. Recorded editor events target those models, and recorded save events are passive timeline markers rather than file writes. Passive instructor models retain native language tokenization but are not synchronized to extension-host language services as editable workspace documents.
+
+Reason: the vertical slice must prove native, deterministic code playback without risking the creator's source files. This also establishes the instructor-state side of the later instructor-plus-learner-overlay model without introducing a simulated editor.
+
+## CS-012: Recordings own their workspace history
+
+Status: accepted.
+
+A recording starts from an immutable, portable workspace checkpoint and records later file additions, updates, moves-as-remove-plus-create, and deletions. Replay materializes from recorded bytes and events; it never falls back to the instructor's current disk when a recorded file is missing.
+
+Lesson parts can reference a prior published checkpoint as their base, while each package remains explicit about the blobs required to reconstruct its starting state.
+
+Reason: an instructor may deliberately delete or restructure files, publish a lesson later, or continue a concept in another lesson. Those actions cannot make earlier teaching state disappear.
+
+## CS-013: Passive replay and learner execution are separate
+
+Status: accepted.
+
+Instructor playback reconstructs recorded state and presentation only. It never reruns terminal commands, tasks, debug launches, project scripts, or binaries. A learner may later choose to execute code in a writable learner overlay, but only through an explicit run action and a host-declared sandbox policy.
+
+Reason: deterministic teaching playback should be safe to open. Execution has materially different trust, isolation, resource, network, secret, and cleanup requirements and must not be implied by the word “replay.”
+
+## CS-014: Replay always enters the learner experience
+
+Status: accepted.
+
+Previewing or replaying an instructor recording opens the same native lesson experience used by learners. Recorded files appear through a recording-backed virtual workspace in that experience; CodeScrim never creates a `.replay` or `.scrim` directory inside the instructor's source workspace.
+
+The creator can inspect the replay tree and timeline, compare a replay file with the current source file, and validate the course navigation, lesson context, transport, and workbench behavior exactly as a learner will receive them. Starting a new recording first closes the transient preview state. Closing the window disposes transient virtual models, while explicitly saved recording packages remain in CodeScrim-owned storage outside the project.
+
+Reason: creator preview must exercise the real learner path without polluting Git, file watchers, imports, search results, or a later recording with temporary files.

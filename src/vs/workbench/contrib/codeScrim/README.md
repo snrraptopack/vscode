@@ -33,7 +33,13 @@ The current native slice provides:
 - one workbench-level session service with a deterministic monotonic playback clock;
 - a focused three-pane lesson workspace with independently collapsible native rails;
 - a scoped layout lease that restores the previous workbench layout on exit;
-- native play, pause, seek, replay, and restart controls; and
-- focused unit tests for playback transitions.
+- native play, pause, seek, replay, and restart controls;
+- native editor recording for text edits, active files, selections, and saves;
+- an immutable starting checkpoint for every document touched during recording;
+- a bounded immutable workspace-tree snapshot with recorded file lifecycle changes;
+- isolated replay through real Monaco models without modifying workspace files; and
+- focused unit tests for playback, recording-clock, checkpoint, and replay-cursor transitions.
 
-The demo lesson exercises the native shell only. Applying recorded editor, terminal, browser, and debugger events begins in Milestone 2.
+Recording is started and stopped through native CodeScrim commands. While active, a normal VS Code status-bar entry shows the captured event count and stops the recording when clicked. `CodeScrim: Replay Last Recording` then opens isolated native editor models and applies the recorded events on their original monotonic timeline. Replay status can stop or restart the run.
+
+This is an in-memory workspace/editor vertical slice: restarting the product discards the draft, and terminal, browser, debugger, narration, persisted packages, seeking, a virtual file explorer, learner overlays, and sandboxed learner execution remain on the roadmap. Passive replay never executes recorded code or commands.

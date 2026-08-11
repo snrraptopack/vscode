@@ -55,6 +55,9 @@ The session itself is the lesson. Code changes, project state, terminal activity
 - Restore discards only the selected learner overlay.
 - Learners can preserve an experiment, compare it with instructor state, and return to the lesson path.
 - Session playback never silently modifies the creator's source workspace.
+- Creator preview always opens the learner lesson experience and never creates temporary replay folders inside the source workspace.
+- Instructor playback is passive state reconstruction and never executes recorded commands, tasks, debug launches, project scripts, or binaries.
+- Running code is an explicit learner action against a separate learner workspace governed by trust, resource, network, process, and lifetime limits.
 
 ## Learning requirements
 
@@ -83,6 +86,7 @@ The session itself is the lesson. Code changes, project state, terminal activity
 - Full cloud marketplace and creator analytics.
 - Pixel-perfect reproduction of every transient animation.
 - Automatically executing recorded terminal commands during passive playback.
+- Treating the instructor snapshot as an execution sandbox.
 
 ## First-release success criteria
 

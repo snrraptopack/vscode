@@ -60,9 +60,13 @@ It exposes direct operations for control flow and events only for broadcasting s
 
 Starts and stops recordings, owns recorder adapters, normalizes timestamps against one monotonic clock, writes event chunks, and creates checkpoints.
 
+The first native adapter snapshots a bounded workspace tree, then records real file lifecycle events, text-model changes, active resources, selections, and saves while the creator continues using the normal workbench. Resources are stored as workspace-root index plus relative path; models outside the workspace are ignored so drafts do not capture absolute machine paths. A native status-bar entry is the only persistent recording chrome.
+
 ### `ICodeScrimReplayService`
 
 Loads validated packages, seeks to checkpoints, applies incremental events, coordinates native surfaces, and prevents replay mutations from being interpreted as learner actions.
+
+The current workspace/editor slice lazily materializes checkpoint files and timeline-created files as `codescrim-replay:` resources backed by real Monaco text models. Recorded filesystem changes, text changes, and selections are applied to that isolated tree on the recording's monotonic clock. Passive instructor models retain their recorded language for native tokenization but are not synchronized to extension-host language services as editable workspace documents. Save events remain timeline markers during passive playback, so replay never writes instructor state into the creator's workspace or depends on files that remain on the creator's disk. Package loading, arbitrary seek, a virtual file-tree UI, and learner overlays remain future layers around this native-model core.
 
 ### `ICodeScrimWorkspaceService`
 

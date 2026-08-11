@@ -41,11 +41,21 @@ Current vertical-slice note: the lesson editor is a native transport and session
 
 ## Milestone 2: Deterministic editor playback
 
-- Define the v2 workspace/editor event contracts.
-- Add a native editor recording slice for model edits, active-file changes, selections, and saves.
-- Materialize an immutable instructor checkpoint.
-- Apply incremental model edits through native model/text-file services.
-- Open files and restore selections through `IEditorService`.
+Status: in progress.
+
+- [x] Define the first v2 editor event contracts and append-only recording buffer.
+- [x] Add a native editor recording slice for model edits, active-file changes, selections, and saves.
+- [x] Capture a bounded immutable workspace checkpoint plus unsaved document state.
+- [x] Record workspace file additions, updates, and deletions alongside editor events.
+- [x] Apply incremental model edits through isolated native Monaco models.
+- [x] Lazily materialize checkpoint and newly created text files without consulting the instructor's current disk.
+- [x] Open replay resources and restore selections through `IEditorService`.
+- [x] Add replay, stop, and restart commands with native status feedback.
+- Make Replay enter the learner lesson experience before applying its first event.
+- Bind the lesson's native center editor to recording-backed virtual models instead of replacing the lesson surface.
+- Add a recording-backed file tree and creator comparison action inside the learner experience.
+- Persist checkpoints and event chunks in a portable package.
+- Add arbitrary seek from a checkpoint.
 - Pause before a learner edit is overwritten.
 - Store learner changes as an overlay.
 
@@ -55,6 +65,8 @@ Acceptance criteria:
 - Learner changes survive until explicitly restored or discarded.
 - Replay writes are not captured as learner events.
 - A short native recording can be replayed without changing its final file contents or event ordering.
+
+Current vertical-slice note: record, stop, replay, stop replay, and restart replay now work for workspace and editor events during one product process. The starting tree captures portable file bytes under explicit safety limits; later additions, updates, and deletions are timeline events. Replay uses a separate URI scheme, does not consult files that the instructor later changes or deletes, and cannot save into the recorded workspace. The next slice moves that working replay target into the native learner lesson experience and adds its browsable virtual tree. Draft persistence, seek, learner edits during replay, and non-editor domains are intentionally not claimed yet.
 
 ## Milestone 3: Native browser integration
 
@@ -103,7 +115,25 @@ Acceptance criteria:
 - Add exercise validation hooks without coupling the package to a single language.
 - Add v1 prototype import as a migration tool.
 
-## Milestone 7: Contextual learning assistant
+## Milestone 7: Secure learner execution
+
+- Materialize a learner workspace from an instructor checkpoint without mutating instructor state.
+- Require an explicit learner action before running code, tasks, terminal commands, debug configurations, or project scripts.
+- Define local sandbox and remote/container runner capability levels.
+- Enforce process, CPU, memory, disk, time, network, secret, and filesystem policies.
+- Make trust decisions and unsupported isolation guarantees visible before execution.
+- Destroy ephemeral execution environments while allowing an explicitly saved learner branch to persist.
+
+Acceptance criteria:
+
+- Passive playback cannot start a process or make a network request through recorded events.
+- A learner can run a checkpoint only after choosing an available sandbox policy.
+- Instructor snapshots remain byte-identical before and after learner execution.
+- Cleanup terminates child processes and removes ephemeral writable state.
+
+This milestone begins only after deterministic restore and learner overlays are stable. The product must not label ordinary local workspace execution as a strong sandbox.
+
+## Milestone 8: Contextual learning assistant
 
 - Define a privacy-filtered lesson context provider.
 - Compare instructor and learner state.
