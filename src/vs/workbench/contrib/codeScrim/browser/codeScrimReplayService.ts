@@ -18,8 +18,8 @@ import { IModelService } from '../../../../editor/common/services/model.js';
 import { localize } from '../../../../nls.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
-import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
-import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
+import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
+import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 
 const REPLAY_TICK_INTERVAL = 16;
 
@@ -278,7 +278,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.learnerModelListeners.clearAndDisposeAll();
 			this.activeDraft = draft;
 			this.publish('preparing', 0);
-			this.prepareWorkspace(draft);
+			this.prepareWorkspace(draft, draft.checkpoints[0]);
 			await this.startPreparedReplay(draft, operation);
 			return this.isCurrentOperation(operation);
 		} catch (error) {
@@ -306,7 +306,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.models.clearAndDisposeAll();
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
-			this.prepareWorkspace(draft);
+			this.prepareWorkspace(draft, draft.checkpoints[0]);
 			await this.startPreparedReplay(draft, operation);
 			return this.isCurrentOperation(operation);
 		} catch (error) {
@@ -336,11 +336,15 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.models.clearAndDisposeAll();
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
-			this.prepareWorkspace(draft);
-			this.cursor.reset(draft.events);
-			const initialResource = this.getInitialResource(draft);
+			const checkpoint = findCodeScrimCheckpoint(draft.checkpoints, target);
+			this.prepareWorkspace(draft, checkpoint);
+			this.cursor.reset(draft.events, checkpoint.eventIndex, checkpoint.timestamp);
+			const initialResource = this.getInitialResource(draft, checkpoint);
 			if (initialResource) {
 				await this.activateReplayResource(initialResource, operation);
+				if (checkpoint.activeResource && checkpoint.selections?.length) {
+					this.surface?.applySelections(checkpoint.activeResource, checkpoint.selections);
+				}
 			}
 			for (const event of this.cursor.advance(target)) {
 				if (!this.isCurrentOperation(operation)) {
@@ -395,11 +399,15 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
 			this.learnerOverlays.clear();
-			this.prepareWorkspace(draft);
-			this.cursor.reset(draft.events);
-			const initialResource = this.getInitialResource(draft);
+			const checkpoint = findCodeScrimCheckpoint(draft.checkpoints, target);
+			this.prepareWorkspace(draft, checkpoint);
+			this.cursor.reset(draft.events, checkpoint.eventIndex, checkpoint.timestamp);
+			const initialResource = this.getInitialResource(draft, checkpoint);
 			if (initialResource) {
 				await this.activateReplayResource(initialResource, operation);
+				if (checkpoint.activeResource && checkpoint.selections?.length) {
+					this.surface?.applySelections(checkpoint.activeResource, checkpoint.selections);
+				}
 			}
 			for (const event of this.cursor.advance(target)) {
 				if (!this.isCurrentOperation(operation)) {
@@ -458,7 +466,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this.startTimer(operation);
 	}
 
-	private prepareWorkspace(draft: ICodeScrimRecordingDraft): void {
+	private prepareWorkspace(draft: ICodeScrimRecordingDraft, checkpoint: ICodeScrimRecordingCheckpoint): void {
 		this.documentsByResource.clear();
 		this.entriesByResource.clear();
 		this.urisByResource.clear();
@@ -468,14 +476,14 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this.pendingActiveResource = undefined;
 		this.surface?.clear();
 
-		for (const entry of draft.checkpoint.entries) {
+		for (const entry of checkpoint.entries) {
 			const key = CodeScrimRecordingBuffer.resourceKey(entry.resource);
 			this.entriesByResource.set(key, entry);
 			if (entry.type === 'file' && entry.text) {
 				this.registerResource(draft.id, entry.resource);
 			}
 		}
-		for (const document of draft.checkpoint.documents) {
+		for (const document of checkpoint.documents) {
 			this.documentsByResource.set(CodeScrimRecordingBuffer.resourceKey(document.resource), document);
 			this.registerResource(draft.id, document.resource);
 		}
@@ -483,10 +491,14 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	}
 
 	private async startPreparedReplay(draft: ICodeScrimRecordingDraft, operation: number): Promise<void> {
-		this.cursor.reset(draft.events);
-		const initialResource = this.getInitialResource(draft);
+		const checkpoint = draft.checkpoints[0];
+		this.cursor.reset(draft.events, checkpoint.eventIndex, checkpoint.timestamp);
+		const initialResource = this.getInitialResource(draft, checkpoint);
 		if (initialResource) {
 			await this.activateReplayResource(initialResource, operation);
+			if (checkpoint.activeResource && checkpoint.selections?.length) {
+				this.surface?.applySelections(checkpoint.activeResource, checkpoint.selections);
+			}
 		}
 		if (!this.isCurrentOperation(operation)) {
 			return;
@@ -497,11 +509,15 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this.publish('paused', 0);
 	}
 
-	private getInitialResource(draft: ICodeScrimRecordingDraft): ICodeScrimWorkspaceResource | undefined {
-		return draft.events.find(event => event.kind === 'editor.activeResourceChanged' && event.payload.resource)?.payload.resource
-			?? draft.checkpoint.documents[0]?.resource
-			?? draft.checkpoint.entries.find(entry => entry.type === 'file' && entry.text)?.resource;
+	private getInitialResource(draft: ICodeScrimRecordingDraft, checkpoint: ICodeScrimRecordingCheckpoint): ICodeScrimWorkspaceResource | undefined {
+		const nextActiveResource = draft.events.slice(checkpoint.eventIndex).find((event): event is Extract<CodeScrimRecordingEvent, { readonly kind: 'editor.activeResourceChanged' }> =>
+			event.kind === 'editor.activeResourceChanged' && event.payload.resource !== undefined)?.payload.resource;
+		return checkpoint.activeResource
+			?? nextActiveResource
+			?? checkpoint.documents[0]?.resource
+			?? checkpoint.entries.find(entry => entry.type === 'file' && entry.text)?.resource;
 	}
+
 
 	private startTimer(operation: number): void {
 		if (!this.isCurrentOperation(operation)) {

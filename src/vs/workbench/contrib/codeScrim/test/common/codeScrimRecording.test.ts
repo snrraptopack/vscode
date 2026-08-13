@@ -29,7 +29,7 @@ suite('CodeScrimRecordingBuffer', () => {
 		assert.strictEqual(first.timestamp, 500);
 		assert.strictEqual(first.sequence, 0);
 		assert.strictEqual(second.id, 'draft-one:1');
-		assert.strictEqual(second.timestamp, 0);
+		assert.strictEqual(second.timestamp, 500);
 		assert.strictEqual(second.sequence, 1);
 	});
 
@@ -75,7 +75,9 @@ suite('CodeScrimRecordingBuffer', () => {
 		assert.deepStrictEqual(draft, {
 			id: 'draft-two',
 			duration: 25_000,
-			checkpoint: {
+			checkpoints: [{
+				timestamp: 0,
+				eventIndex: 0,
 				documents: [{
 					resource: { root: 0, path: 'src/index.ts' },
 					languageId: 'typescript',
@@ -91,7 +93,25 @@ suite('CodeScrimRecordingBuffer', () => {
 					text: true,
 				}],
 				skippedEntryCount: 1,
-			},
+			}, {
+				timestamp: 25_000,
+				eventIndex: 1,
+				documents: [{
+					resource: { root: 0, path: 'src/index.ts' },
+					languageId: 'typescript',
+					versionId: 7,
+					eol: '\n',
+					text: 'const value = 1;\n',
+				}],
+				entries: [{
+					resource: { root: 0, path: 'src/index.ts' },
+					type: 'file',
+					size: 17,
+					contents: 'Y29uc3QgdmFsdWUgPSAxOwo=',
+					text: true,
+				}],
+				skippedEntryCount: 1,
+			}],
 			events: [{
 				id: 'draft-two:0',
 				version: 1,
@@ -105,9 +125,10 @@ suite('CodeScrimRecordingBuffer', () => {
 		assert.strictEqual(buffer.isRecording, false);
 		assert.strictEqual(buffer.eventCount, 0);
 		assert.strictEqual(Object.isFrozen(draft?.events), true);
-		assert.strictEqual(Object.isFrozen(draft?.checkpoint.documents), true);
-		assert.strictEqual(Object.isFrozen(draft?.checkpoint.entries), true);
-		assert.strictEqual(Object.isFrozen(draft?.checkpoint.entries[0]), true);
+		assert.strictEqual(Object.isFrozen(draft?.checkpoints), true);
+		assert.strictEqual(Object.isFrozen(draft?.checkpoints[0].documents), true);
+		assert.strictEqual(Object.isFrozen(draft?.checkpoints[0].entries), true);
+		assert.strictEqual(Object.isFrozen(draft?.checkpoints[0].entries[0]), true);
 	});
 
 	test('rejects appends outside an active recording', () => {
@@ -142,6 +163,59 @@ suite('CodeScrimRecordingBuffer', () => {
 		assert.strictEqual(Object.isFrozen(event.payload.deleted), true);
 		assert.strictEqual(Object.isFrozen(event.payload.created), true);
 		assert.strictEqual(Object.isFrozen(event.payload.created[0]), true);
+	});
+
+	test('checkpoints the latest unsaved text for a file created during recording', () => {
+		const buffer = new CodeScrimRecordingBuffer();
+		buffer.start('draft-created-file', 0);
+		buffer.append({
+			domain: 'workspace',
+			kind: 'workspace.entriesChanged',
+			payload: {
+				deleted: [],
+				created: [{
+					resource: { root: 0, path: 'created.ts' },
+					type: 'file',
+					size: 0,
+					contents: '',
+					text: true,
+				}],
+			},
+		}, 10);
+		buffer.append({
+			domain: 'editor',
+			kind: 'editor.documentChanged',
+			payload: {
+				resource: { root: 0, path: 'created.ts' },
+				languageId: 'typescript',
+				versionId: 2,
+				eol: '\n',
+				text: 'const created = true;',
+				changes: [{ rangeOffset: 0, rangeLength: 0, text: 'const created = true;' }],
+				undoing: false,
+				redoing: false,
+			},
+		}, 15);
+
+		const draft = buffer.stop(30);
+		assert.strictEqual(draft?.checkpoints.at(-1)?.documents[0]?.text, 'const created = true;');
+		assert.strictEqual(draft?.checkpoints.at(-1)?.documents[0]?.languageId, 'typescript');
+		assert.strictEqual(draft?.checkpoints.at(-1)?.eventIndex, 2);
+	});
+
+	test('creates automatic checkpoints from time and event-volume thresholds', () => {
+		const timed = new CodeScrimRecordingBuffer();
+		timed.start('draft-timed-checkpoint', 0);
+		timed.append({ domain: 'editor', kind: 'editor.activeResourceChanged', payload: {} }, 30_000);
+		assert.strictEqual(timed.stop(30_001)?.checkpoints[1]?.timestamp, 30_000_000);
+
+		const volume = new CodeScrimRecordingBuffer();
+		volume.start('draft-volume-checkpoint', 0);
+		for (let index = 0; index < 1_000; index++) {
+			volume.append({ domain: 'editor', kind: 'editor.activeResourceChanged', payload: {} }, index);
+		}
+		const draft = volume.stop(1_001);
+		assert.strictEqual(draft?.checkpoints[1]?.eventIndex, 1_000);
 	});
 
 	test('does not replace an active recording', () => {

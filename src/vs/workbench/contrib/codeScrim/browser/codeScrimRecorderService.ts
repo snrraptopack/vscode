@@ -135,6 +135,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		}
 		this.recordingListeners.clear();
 		await this.pendingWorkspaceChanges;
+		this.buffer.captureCheckpoint(this.now());
 		this.publishState();
 		return true;
 	}
@@ -251,12 +252,22 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 				});
 			}
 		}
+		if (!captureCheckpoint) {
+			this.buffer.captureDocument({
+				resource,
+				languageId: model.getLanguageId(),
+				versionId: model.getVersionId(),
+				eol: model.getEOL(),
+				text: model.getValue(),
+			});
+		}
 
 		listeners.add(model.onDidChangeContent(event => this.append({
 			domain: 'editor',
 			kind: 'editor.documentChanged',
 			payload: {
 				resource,
+				languageId: model.getLanguageId(),
 				versionId: event.versionId,
 				eol: event.eol,
 				text: model.getValue(),

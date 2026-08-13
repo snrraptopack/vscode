@@ -25,7 +25,7 @@ suite('CodeScrimPackageCodec', () => {
 			decoded,
 			plaintextVisible: encoded.toString().includes('private source text'),
 		}, {
-			header: { packageId: 'package-test', keyId: 'author-key', major: 1, minor: 0 },
+			header: { packageId: 'package-test', keyId: 'author-key', major: 2, minor: 0 },
 			decoded: draft,
 			plaintextVisible: false,
 		});
@@ -65,6 +65,21 @@ suite('CodeScrimPackageCodec', () => {
 		assert.throws(() => codec.inspect(VSBuffer.fromString('not a scrim')), /not a valid CodeScrim package/);
 		assert.throws(() => codec.inspect(unsupported), /version 9\.0 is not supported/);
 	});
+
+	test('rejects obsolete development packages without a compatibility shim', async () => {
+		const codec = new CodeScrimPackageCodec();
+		const encoded = await codec.encode(createDraft(), await createKey('author-key'));
+		const obsolete = encoded.clone();
+		const headerLength = new DataView(obsolete.buffer.buffer, obsolete.buffer.byteOffset + 8, 4).getUint32(0, false);
+		const headerStart = 12;
+		const header = JSON.parse(obsolete.slice(headerStart, headerStart + headerLength).toString());
+		header.major = 1;
+		const replacement = VSBuffer.fromString(JSON.stringify(header));
+		assert.strictEqual(replacement.byteLength, headerLength);
+		obsolete.set(replacement, headerStart);
+
+		assert.throws(() => codec.inspect(obsolete), /obsolete development format/);
+	});
 });
 
 async function createKey(id: string): Promise<ICodeScrimPackageKey> {
@@ -78,7 +93,9 @@ function createDraft(): ICodeScrimRecordingDraft {
 	return {
 		id: 'package-test',
 		duration: 2_000,
-		checkpoint: {
+		checkpoints: [{
+			timestamp: 0,
+			eventIndex: 0,
 			documents: [{
 				resource: { root: 0, path: 'src/lesson.ts' },
 				languageId: 'typescript',
@@ -94,7 +111,7 @@ function createDraft(): ICodeScrimRecordingDraft {
 				text: true,
 			}],
 			skippedEntryCount: 0,
-		},
+		}],
 		events: [{
 			id: 'package-test:0',
 			version: 1,
@@ -104,6 +121,7 @@ function createDraft(): ICodeScrimRecordingDraft {
 			kind: 'editor.documentChanged',
 			payload: {
 				resource: { root: 0, path: 'src/lesson.ts' },
+				languageId: 'typescript',
 				versionId: 2,
 				eol: '\n',
 				text: 'private source text!',

@@ -6,7 +6,7 @@
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { CodeScrimEditorEvent } from '../../common/codeScrimRecording.js';
-import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor } from '../../common/codeScrimReplay.js';
+import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, findCodeScrimCheckpoint } from '../../common/codeScrimReplay.js';
 
 suite('CodeScrimReplayCursor', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -56,6 +56,16 @@ suite('CodeScrimReplayCursor', () => {
 		assert.deepStrictEqual(cursor.advance(0), events);
 	});
 
+	test('resets directly to a checkpoint event index', () => {
+		const cursor = new CodeScrimReplayCursor();
+		const events = [event(0, 100), event(1, 100), event(2, 200)];
+		cursor.reset(events, 2, 100);
+
+		assert.strictEqual(cursor.appliedEventCount, 2);
+		assert.deepStrictEqual(cursor.advance(100), []);
+		assert.deepStrictEqual(cursor.advance(200), [events[2]]);
+	});
+
 	test('releases one event without consuming the rest of a timestamp batch', () => {
 		const cursor = new CodeScrimReplayCursor();
 		const events = [event(0, 100), event(1, 100), event(2, 200)];
@@ -66,6 +76,20 @@ suite('CodeScrimReplayCursor', () => {
 		assert.strictEqual(cursor.advanceOne(100), events[1]);
 		assert.strictEqual(cursor.advanceOne(100), undefined);
 		assert.strictEqual(cursor.advanceOne(200), events[2]);
+	});
+});
+
+suite('CodeScrim checkpoint index', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('finds the nearest checkpoint at or before the target', () => {
+		const checkpoint = (timestamp: number, eventIndex: number) => ({ timestamp, eventIndex, documents: [], entries: [], skippedEntryCount: 0 });
+		const checkpoints = [checkpoint(0, 0), checkpoint(30_000, 20), checkpoint(60_000, 45)];
+
+		assert.strictEqual(findCodeScrimCheckpoint(checkpoints, 0), checkpoints[0]);
+		assert.strictEqual(findCodeScrimCheckpoint(checkpoints, 59_999), checkpoints[1]);
+		assert.strictEqual(findCodeScrimCheckpoint(checkpoints, 60_000), checkpoints[2]);
+		assert.strictEqual(findCodeScrimCheckpoint(checkpoints, 90_000), checkpoints[2]);
 	});
 });
 

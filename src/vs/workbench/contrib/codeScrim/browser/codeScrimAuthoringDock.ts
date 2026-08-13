@@ -43,6 +43,9 @@ export class CodeScrimAuthoringDockContribution extends Disposable implements IW
 		// Anchor inside the editor part so the launcher follows the coding canvas instead of
 		// covering global Activity Bar controls when side bars are shown or resized.
 		const editorContainer = layoutService.getContainer(mainWindow, Parts.EDITOR_PART);
+		if (!editorContainer) {
+			throw new Error('CodeScrim requires the workbench editor container.');
+		}
 		this.shell = DOM.append(editorContainer, DOM.$('.codescrim-authoring-shell'));
 		this.panel = DOM.append(this.shell, DOM.$('.codescrim-authoring-dock', {
 			role: 'dialog',
@@ -159,8 +162,11 @@ export class CodeScrimAuthoringDockContribution extends Disposable implements IW
 
 	private getStateDetail(): string {
 		const state = this.recorderService.state;
-		if (state.status !== 'idle') {
+		if (state.status === 'recording' || state.status === 'paused') {
 			return localize('codeScrim.liveRecordingDetail', "{0} events - {1} workspace files", state.eventCount, state.checkpointEntryCount);
+		}
+		if (state.status === 'preparing') {
+			return localize('codeScrim.preparingRecordingDetail', "Preparing the workspace checkpoint.");
 		}
 		const draft = this.recorderService.lastDraft;
 		return draft

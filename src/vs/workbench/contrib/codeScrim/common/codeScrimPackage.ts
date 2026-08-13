@@ -6,14 +6,14 @@
 import { decodeBase64, encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { URI } from '../../../../base/common/uri.js';
-import { CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
+import { CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
 
 export const CODE_SCRIM_SAVE_RECORDING_COMMAND_ID = 'codescrim.saveRecording';
 export const CODE_SCRIM_OPEN_RECORDING_COMMAND_ID = 'codescrim.openRecording';
 export const CODE_SCRIM_PACKAGE_EXTENSION = 'scrim';
 
 const PACKAGE_MAGIC = new Uint8Array([0x43, 0x4f, 0x44, 0x45, 0x53, 0x43, 0x52, 0x4d]); // CODESCRM
-const PACKAGE_MAJOR_VERSION = 1;
+const PACKAGE_MAJOR_VERSION = 2;
 const PACKAGE_MINOR_VERSION = 0;
 const PACKAGE_HEADER_LENGTH_BYTES = 4;
 const PACKAGE_MAX_HEADER_BYTES = 16 * 1024;
@@ -21,6 +21,7 @@ const PACKAGE_MAX_ENCRYPTED_BYTES = 256 * 1024 * 1024;
 const PACKAGE_MAX_EXPANDED_BYTES = 512 * 1024 * 1024;
 const PACKAGE_MAX_EVENT_COUNT = 2_000_000;
 const PACKAGE_MAX_ENTRY_COUNT = 100_000;
+const PACKAGE_MAX_CHECKPOINT_COUNT = 10_000;
 const PACKAGE_EVENT_CHUNK_SIZE = 500;
 const PACKAGE_KEY_ALGORITHM = 'AES-GCM';
 const PACKAGE_IV_LENGTH = 12;
@@ -53,19 +54,25 @@ interface ICodeScrimEventChunk {
 	readonly eventCount: number;
 }
 
+interface ICodeScrimPackagedCheckpoint {
+	readonly timestamp: number;
+	readonly eventIndex: number;
+	readonly activeResource?: ICodeScrimWorkspaceResource;
+	readonly selections?: readonly ICodeScrimSelection[];
+	readonly documents: readonly ICodeScrimPackagedDocument[];
+	readonly entries: readonly ICodeScrimPackagedEntry[];
+	readonly skippedEntryCount: number;
+}
+
 interface ICodeScrimPackagePayload {
 	readonly manifest: {
 		readonly format: 'codescrim-session';
-		readonly schemaVersion: 1;
+		readonly schemaVersion: 2;
 		readonly sessionId: string;
 		readonly duration: number;
 		readonly timebase: 'microseconds';
 		readonly eventCount: number;
-		readonly checkpoint: {
-			readonly documents: readonly ICodeScrimPackagedDocument[];
-			readonly entries: readonly ICodeScrimPackagedEntry[];
-			readonly skippedEntryCount: number;
-		};
+		readonly checkpoints: readonly ICodeScrimPackagedCheckpoint[];
 		readonly eventChunks: readonly ICodeScrimEventChunk[];
 	};
 	readonly blobs: Readonly<Record<string, string>>;
@@ -167,23 +174,34 @@ export class CodeScrimPackageCodec {
 			return digest;
 		};
 
-		const documents: ICodeScrimPackagedDocument[] = [];
-		for (const document of draft.checkpoint.documents) {
-			documents.push({
-				resource: document.resource,
-				languageId: document.languageId,
-				versionId: document.versionId,
-				eol: document.eol,
-				textBlob: await storeBlob(VSBuffer.fromString(document.text).buffer),
-			});
-		}
-
-		const entries: ICodeScrimPackagedEntry[] = [];
-		for (const entry of draft.checkpoint.entries) {
-			const { contents, ...metadata } = entry;
-			entries.push({
-				...metadata,
-				contentsBlob: contents === undefined ? undefined : await storeBlob(decodeBase64(contents).buffer),
+		const checkpoints: ICodeScrimPackagedCheckpoint[] = [];
+		for (const checkpoint of draft.checkpoints) {
+			const documents: ICodeScrimPackagedDocument[] = [];
+			for (const document of checkpoint.documents) {
+				documents.push({
+					resource: document.resource,
+					languageId: document.languageId,
+					versionId: document.versionId,
+					eol: document.eol,
+					textBlob: await storeBlob(VSBuffer.fromString(document.text).buffer),
+				});
+			}
+			const entries: ICodeScrimPackagedEntry[] = [];
+			for (const entry of checkpoint.entries) {
+				const { contents, ...metadata } = entry;
+				entries.push({
+					...metadata,
+					contentsBlob: contents === undefined ? undefined : await storeBlob(decodeBase64(contents).buffer),
+				});
+			}
+			checkpoints.push({
+				timestamp: checkpoint.timestamp,
+				eventIndex: checkpoint.eventIndex,
+				activeResource: checkpoint.activeResource,
+				selections: checkpoint.selections,
+				documents,
+				entries,
+				skippedEntryCount: checkpoint.skippedEntryCount,
 			});
 		}
 
@@ -203,12 +221,12 @@ export class CodeScrimPackageCodec {
 		return {
 			manifest: {
 				format: 'codescrim-session',
-				schemaVersion: 1,
+				schemaVersion: 2,
 				sessionId: draft.id,
 				duration: draft.duration,
 				timebase: 'microseconds',
 				eventCount: draft.events.length,
-				checkpoint: { documents, entries, skippedEntryCount: draft.checkpoint.skippedEntryCount },
+				checkpoints,
 				eventChunks,
 			},
 			blobs,
@@ -228,23 +246,34 @@ export class CodeScrimPackageCodec {
 			return bytes;
 		};
 
-		const documents: ICodeScrimDocumentCheckpoint[] = [];
-		for (const document of payload.manifest.checkpoint.documents) {
-			documents.push({
-				resource: document.resource,
-				languageId: document.languageId,
-				versionId: document.versionId,
-				eol: document.eol,
-				text: (await readBlob(document.textBlob)).toString(),
-			});
-		}
-
-		const entries: ICodeScrimWorkspaceEntryCheckpoint[] = [];
-		for (const entry of payload.manifest.checkpoint.entries) {
-			const { contentsBlob, ...metadata } = entry;
-			entries.push({
-				...metadata,
-				contents: contentsBlob === undefined ? undefined : encodeBase64(await readBlob(contentsBlob)),
+		const checkpoints: ICodeScrimRecordingCheckpoint[] = [];
+		for (const packaged of payload.manifest.checkpoints) {
+			const documents: ICodeScrimDocumentCheckpoint[] = [];
+			for (const document of packaged.documents) {
+				documents.push({
+					resource: document.resource,
+					languageId: document.languageId,
+					versionId: document.versionId,
+					eol: document.eol,
+					text: (await readBlob(document.textBlob)).toString(),
+				});
+			}
+			const entries: ICodeScrimWorkspaceEntryCheckpoint[] = [];
+			for (const entry of packaged.entries) {
+				const { contentsBlob, ...metadata } = entry;
+				entries.push({
+					...metadata,
+					contents: contentsBlob === undefined ? undefined : encodeBase64(await readBlob(contentsBlob)),
+				});
+			}
+			checkpoints.push({
+				timestamp: packaged.timestamp,
+				eventIndex: packaged.eventIndex,
+				...(packaged.activeResource ? { activeResource: packaged.activeResource } : {}),
+				...(packaged.selections ? { selections: packaged.selections } : {}),
+				documents,
+				entries,
+				skippedEntryCount: packaged.skippedEntryCount,
 			});
 		}
 
@@ -265,12 +294,7 @@ export class CodeScrimPackageCodec {
 			throw new Error('The CodeScrim event index is incomplete.');
 		}
 
-		const checkpoint: ICodeScrimRecordingCheckpoint = {
-			documents,
-			entries,
-			skippedEntryCount: payload.manifest.checkpoint.skippedEntryCount,
-		};
-		return { id: payload.manifest.sessionId, duration: payload.manifest.duration, checkpoint, events };
+		return { id: payload.manifest.sessionId, duration: payload.manifest.duration, checkpoints, events };
 	}
 
 	private readHeader(packageBytes: VSBuffer): { readonly header: ICodeScrimPackageHeader; readonly encrypted: Uint8Array } {
@@ -298,6 +322,9 @@ export class CodeScrimPackageCodec {
 		}
 		const header = parseHeader(candidate);
 		if (header.major !== PACKAGE_MAJOR_VERSION) {
+			if (header.major < PACKAGE_MAJOR_VERSION) {
+				throw new Error(`CodeScrim package version ${header.major}.${header.minor} uses an obsolete development format.`);
+			}
 			throw new Error(`CodeScrim package version ${header.major}.${header.minor} is not supported by this installation.`);
 		}
 		const encrypted = packageBytes.buffer.slice(encryptedOffset);
@@ -336,47 +363,87 @@ function parseHeader(candidate: unknown): ICodeScrimPackageHeader {
 
 function parsePayload(candidate: unknown): ICodeScrimPackagePayload {
 	if (!isRecord(candidate) || !isRecord(candidate.manifest) || candidate.manifest.format !== 'codescrim-session' ||
-		candidate.manifest.schemaVersion !== 1 || typeof candidate.manifest.sessionId !== 'string' || !candidate.manifest.sessionId ||
+		candidate.manifest.schemaVersion !== 2 || typeof candidate.manifest.sessionId !== 'string' || !candidate.manifest.sessionId ||
 		!isSafeInteger(candidate.manifest.duration) || candidate.manifest.duration < 0 || candidate.manifest.timebase !== 'microseconds' ||
 		!isSafeInteger(candidate.manifest.eventCount) || candidate.manifest.eventCount < 0 || candidate.manifest.eventCount > PACKAGE_MAX_EVENT_COUNT ||
-		!isRecord(candidate.manifest.checkpoint) || !Array.isArray(candidate.manifest.checkpoint.documents) ||
-		!Array.isArray(candidate.manifest.checkpoint.entries) || !Array.isArray(candidate.manifest.eventChunks) || !isRecord(candidate.blobs)) {
+		!Array.isArray(candidate.manifest.checkpoints) || !candidate.manifest.checkpoints.length || candidate.manifest.checkpoints.length > PACKAGE_MAX_CHECKPOINT_COUNT ||
+		!Array.isArray(candidate.manifest.eventChunks) || !isRecord(candidate.blobs)) {
 		throw new Error('The CodeScrim package manifest is invalid.');
 	}
-	if (candidate.manifest.checkpoint.documents.length > PACKAGE_MAX_ENTRY_COUNT || candidate.manifest.checkpoint.entries.length > PACKAGE_MAX_ENTRY_COUNT) {
-		throw new Error('The CodeScrim package checkpoint exceeds its safety limit.');
+	for (const checkpoint of candidate.manifest.checkpoints) {
+		if (!isRecord(checkpoint) || !isSafeInteger(checkpoint.timestamp) || checkpoint.timestamp < 0 ||
+			!isSafeInteger(checkpoint.eventIndex) || checkpoint.eventIndex < 0 || !Array.isArray(checkpoint.documents) ||
+			!Array.isArray(checkpoint.entries) || checkpoint.documents.length > PACKAGE_MAX_ENTRY_COUNT || checkpoint.entries.length > PACKAGE_MAX_ENTRY_COUNT) {
+			throw new Error('The CodeScrim package checkpoint index is invalid.');
+		}
 	}
 	return candidate as unknown as ICodeScrimPackagePayload;
 }
 
 function validateDraft(draft: ICodeScrimRecordingDraft): void {
 	if (!draft || typeof draft.id !== 'string' || !draft.id || !isSafeInteger(draft.duration) || draft.duration < 0 ||
-		!draft.checkpoint || !Array.isArray(draft.checkpoint.documents) || !Array.isArray(draft.checkpoint.entries) || !Array.isArray(draft.events) ||
-		draft.events.length > PACKAGE_MAX_EVENT_COUNT || draft.checkpoint.entries.length > PACKAGE_MAX_ENTRY_COUNT || draft.checkpoint.documents.length > PACKAGE_MAX_ENTRY_COUNT) {
+		!Array.isArray(draft.checkpoints) || !draft.checkpoints.length || draft.checkpoints.length > PACKAGE_MAX_CHECKPOINT_COUNT ||
+		!Array.isArray(draft.events) || draft.events.length > PACKAGE_MAX_EVENT_COUNT) {
 		throw new Error('The CodeScrim recording is invalid.');
 	}
 
+	let previousCheckpointTimestamp = -1;
+	let previousCheckpointEventIndex = -1;
+	for (const checkpoint of draft.checkpoints) {
+		if (!isSafeInteger(checkpoint.timestamp) || checkpoint.timestamp < 0 || checkpoint.timestamp > draft.duration ||
+			!isSafeInteger(checkpoint.eventIndex) || checkpoint.eventIndex < 0 || checkpoint.eventIndex > draft.events.length ||
+			checkpoint.timestamp < previousCheckpointTimestamp || checkpoint.eventIndex <= previousCheckpointEventIndex ||
+			checkpoint.entries.length > PACKAGE_MAX_ENTRY_COUNT || checkpoint.documents.length > PACKAGE_MAX_ENTRY_COUNT) {
+			throw new Error('The CodeScrim checkpoint index is invalid.');
+		}
+		const precedingEvent = draft.events[checkpoint.eventIndex - 1];
+		const followingEvent = draft.events[checkpoint.eventIndex];
+		if ((precedingEvent && precedingEvent.timestamp > checkpoint.timestamp) ||
+			(followingEvent && followingEvent.timestamp < checkpoint.timestamp)) {
+			throw new Error('The CodeScrim checkpoint does not match its event position.');
+		}
+		if (checkpoint.activeResource) {
+			validateResource(checkpoint.activeResource);
+		}
+		if (checkpoint.selections?.some((selection: ICodeScrimSelection) => !isPositiveInteger(selection.selectionStartLineNumber) ||
+			!isPositiveInteger(selection.selectionStartColumn) || !isPositiveInteger(selection.positionLineNumber) ||
+			!isPositiveInteger(selection.positionColumn))) {
+			throw new Error('The CodeScrim checkpoint selection is invalid.');
+		}
+		validateCheckpointContents(checkpoint);
+		previousCheckpointTimestamp = checkpoint.timestamp;
+		previousCheckpointEventIndex = checkpoint.eventIndex;
+	}
+	if (draft.checkpoints[0].timestamp !== 0 || draft.checkpoints[0].eventIndex !== 0) {
+		throw new Error('The CodeScrim checkpoint index must begin at timeline zero.');
+	}
+
 	let previousSequence = -1;
-	for (const document of draft.checkpoint.documents) {
-		validateResource(document.resource);
-		if (typeof document.languageId !== 'string' || typeof document.text !== 'string' || typeof document.eol !== 'string' || !isSafeInteger(document.versionId)) {
-			throw new Error('The CodeScrim document checkpoint is invalid.');
-		}
-	}
-	for (const entry of draft.checkpoint.entries) {
-		validateResource(entry.resource);
-		if ((entry.type !== 'file' && entry.type !== 'directory') || typeof entry.text !== 'boolean' || (entry.contents !== undefined && typeof entry.contents !== 'string')) {
-			throw new Error('The CodeScrim workspace checkpoint is invalid.');
-		}
-	}
+	let previousTimestamp = -1;
 	for (const event of draft.events) {
 		if (!event || typeof event.id !== 'string' || event.version !== 1 || !isSafeInteger(event.timestamp) || event.timestamp < 0 ||
-			!isSafeInteger(event.sequence) || event.sequence < 0 || event.sequence <= previousSequence ||
+			!isSafeInteger(event.sequence) || event.sequence < 0 || event.sequence <= previousSequence || event.timestamp < previousTimestamp ||
 			(event.domain !== 'editor' && event.domain !== 'workspace') || typeof event.kind !== 'string' || !isRecord(event.payload)) {
 			throw new Error('The CodeScrim event stream is invalid or out of order.');
 		}
 		validateEventPayload(event);
 		previousSequence = event.sequence;
+		previousTimestamp = event.timestamp;
+	}
+}
+
+function validateCheckpointContents(checkpoint: ICodeScrimRecordingCheckpoint): void {
+	for (const document of checkpoint.documents) {
+		validateResource(document.resource);
+		if (typeof document.languageId !== 'string' || typeof document.text !== 'string' || typeof document.eol !== 'string' || !isSafeInteger(document.versionId)) {
+			throw new Error('The CodeScrim document checkpoint is invalid.');
+		}
+	}
+	for (const entry of checkpoint.entries) {
+		validateResource(entry.resource);
+		if ((entry.type !== 'file' && entry.type !== 'directory') || typeof entry.text !== 'boolean' || (entry.contents !== undefined && typeof entry.contents !== 'string')) {
+			throw new Error('The CodeScrim workspace checkpoint is invalid.');
+		}
 	}
 }
 
@@ -389,7 +456,8 @@ function validateEventPayload(event: CodeScrimRecordingEvent): void {
 			return;
 		case 'editor.documentChanged':
 			validateResource(event.payload.resource);
-			if (!isSafeInteger(event.payload.versionId) || typeof event.payload.eol !== 'string' ||
+			if (typeof event.payload.languageId !== 'string' || !event.payload.languageId ||
+				!isSafeInteger(event.payload.versionId) || typeof event.payload.eol !== 'string' ||
 				(event.payload.text !== undefined && typeof event.payload.text !== 'string') || !Array.isArray(event.payload.changes) ||
 				event.payload.changes.some(change => !isSafeInteger(change.rangeOffset) || change.rangeOffset < 0 ||
 					!isSafeInteger(change.rangeLength) || change.rangeLength < 0 || typeof change.text !== 'string') ||

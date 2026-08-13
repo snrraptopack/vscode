@@ -47,6 +47,11 @@ export interface ICodeScrimWorkspaceEntryCheckpoint {
 }
 
 export interface ICodeScrimRecordingCheckpoint {
+	readonly timestamp: number;
+	/** Index of the first event not represented by this checkpoint. */
+	readonly eventIndex: number;
+	readonly activeResource?: ICodeScrimWorkspaceResource;
+	readonly selections?: readonly ICodeScrimSelection[];
 	readonly documents: readonly ICodeScrimDocumentCheckpoint[];
 	readonly entries: readonly ICodeScrimWorkspaceEntryCheckpoint[];
 	readonly skippedEntryCount: number;
@@ -66,6 +71,7 @@ export type CodeScrimEditorEvent =
 	| ICodeScrimEvent<'editor', 'editor.activeResourceChanged', { readonly resource?: ICodeScrimWorkspaceResource }>
 	| ICodeScrimEvent<'editor', 'editor.documentChanged', {
 		readonly resource: ICodeScrimWorkspaceResource;
+		readonly languageId: string;
 		readonly versionId: number;
 		readonly eol: string;
 		/** Full post-edit text anchor. Optional only for replaying drafts recorded before it was introduced. */
@@ -98,7 +104,7 @@ export type CodeScrimRecordingEventData = CodeScrimRecordingEvent extends infer 
 export interface ICodeScrimRecordingDraft {
 	readonly id: string;
 	readonly duration: number;
-	readonly checkpoint: ICodeScrimRecordingCheckpoint;
+	readonly checkpoints: readonly ICodeScrimRecordingCheckpoint[];
 	readonly events: readonly CodeScrimRecordingEvent[];
 }
 
@@ -112,6 +118,8 @@ export type CodeScrimRecordingState =
  * converts them to integer microseconds and assigns a sequence number for stable ordering.
  */
 export class CodeScrimRecordingBuffer {
+	private static readonly CHECKPOINT_INTERVAL = 30_000_000;
+	private static readonly CHECKPOINT_EVENT_INTERVAL = 1_000;
 
 	private draftId: string | undefined;
 	private startedAt = 0;
@@ -121,6 +129,9 @@ export class CodeScrimRecordingBuffer {
 	private readonly events: CodeScrimRecordingEvent[] = [];
 	private readonly documents = new Map<string, ICodeScrimDocumentCheckpoint>();
 	private readonly entries = new Map<string, ICodeScrimWorkspaceEntryCheckpoint>();
+	private readonly checkpoints: ICodeScrimRecordingCheckpoint[] = [];
+	private activeResource: ICodeScrimWorkspaceResource | undefined;
+	private selections: readonly ICodeScrimSelection[] | undefined;
 	private skippedEntries = 0;
 
 	get isRecording(): boolean {
@@ -163,6 +174,9 @@ export class CodeScrimRecordingBuffer {
 		this.events.length = 0;
 		this.documents.clear();
 		this.entries.clear();
+		this.checkpoints.length = 0;
+		this.activeResource = undefined;
+		this.selections = undefined;
 		this.skippedEntries = 0;
 	}
 
@@ -189,12 +203,13 @@ export class CodeScrimRecordingBuffer {
 		}
 
 		const key = CodeScrimRecordingBuffer.resourceKey(document.resource);
-		if (!this.documents.has(key)) {
-			this.documents.set(key, Object.freeze({
-				...document,
-				resource: Object.freeze({ ...document.resource }),
-			}));
+		if (!this.checkpoints.length && this.documents.has(key)) {
+			return;
 		}
+		this.documents.set(key, Object.freeze({
+			...document,
+			resource: Object.freeze({ ...document.resource }),
+		}));
 	}
 
 	captureWorkspaceEntry(entry: ICodeScrimWorkspaceEntryCheckpoint): void {
@@ -220,6 +235,7 @@ export class CodeScrimRecordingBuffer {
 			throw new Error('A CodeScrim recording is not active.');
 		}
 
+		this.ensureInitialCheckpoint();
 		const sequence = this.sequence++;
 		const normalizedEvent = event.kind === 'workspace.entriesChanged'
 			? {
@@ -230,15 +246,26 @@ export class CodeScrimRecordingBuffer {
 				}),
 			}
 			: event;
+		const timestamp = Math.max(this.events[this.events.length - 1]?.timestamp ?? 0, this.toMicroseconds(now));
 		const recordedEvent = Object.freeze({
 			...normalizedEvent,
 			id: `${this.draftId}:${sequence}`,
 			version: 1 as const,
-			timestamp: this.toMicroseconds(now),
+			timestamp,
 			sequence,
 		}) as CodeScrimRecordingEvent;
 		this.events.push(recordedEvent);
+		this.applyToCheckpointState(recordedEvent);
+		this.captureAutomaticCheckpoint(recordedEvent.timestamp);
 		return recordedEvent;
+	}
+
+	captureCheckpoint(now: number): void {
+		if (!this.draftId) {
+			return;
+		}
+		this.ensureInitialCheckpoint();
+		this.captureCheckpointAt(this.toMicroseconds(now));
 	}
 
 	stop(now: number): ICodeScrimRecordingDraft | undefined {
@@ -246,14 +273,12 @@ export class CodeScrimRecordingBuffer {
 			return undefined;
 		}
 
+		this.ensureInitialCheckpoint();
+		this.captureCheckpointAt(this.toMicroseconds(now));
 		const draft = Object.freeze({
 			id: this.draftId,
 			duration: this.toMicroseconds(now),
-			checkpoint: Object.freeze({
-				documents: Object.freeze([...this.documents.values()]),
-				entries: Object.freeze([...this.entries.values()]),
-				skippedEntryCount: this.skippedEntries,
-			}),
+			checkpoints: Object.freeze([...this.checkpoints]),
 			events: Object.freeze([...this.events]),
 		});
 		this.draftId = undefined;
@@ -264,8 +289,83 @@ export class CodeScrimRecordingBuffer {
 		this.events.length = 0;
 		this.documents.clear();
 		this.entries.clear();
+		this.checkpoints.length = 0;
+		this.activeResource = undefined;
+		this.selections = undefined;
 		this.skippedEntries = 0;
 		return draft;
+	}
+
+	private ensureInitialCheckpoint(): void {
+		if (!this.checkpoints.length) {
+			this.captureCheckpointAt(0);
+		}
+	}
+
+	private captureAutomaticCheckpoint(timestamp: number): void {
+		const previous = this.checkpoints[this.checkpoints.length - 1];
+		if (timestamp - previous.timestamp >= CodeScrimRecordingBuffer.CHECKPOINT_INTERVAL ||
+			this.events.length - previous.eventIndex >= CodeScrimRecordingBuffer.CHECKPOINT_EVENT_INTERVAL) {
+			this.captureCheckpointAt(timestamp);
+		}
+	}
+
+	private captureCheckpointAt(timestamp: number): void {
+		const previous = this.checkpoints[this.checkpoints.length - 1];
+		if (previous?.eventIndex === this.events.length) {
+			return;
+		}
+		this.checkpoints.push(Object.freeze({
+			timestamp,
+			eventIndex: this.events.length,
+			...(this.activeResource ? { activeResource: Object.freeze({ ...this.activeResource }) } : {}),
+			...(this.selections ? { selections: Object.freeze(this.selections.map(selection => Object.freeze({ ...selection }))) } : {}),
+			documents: Object.freeze([...this.documents.values()]),
+			entries: Object.freeze([...this.entries.values()]),
+			skippedEntryCount: this.skippedEntries,
+		}));
+	}
+
+	private applyToCheckpointState(event: CodeScrimRecordingEvent): void {
+		switch (event.kind) {
+			case 'workspace.entriesChanged':
+				for (const resource of event.payload.deleted) {
+					const prefix = `${resource.path}/`;
+					for (const [key, entry] of this.entries) {
+						if (entry.resource.root === resource.root && (entry.resource.path === resource.path || entry.resource.path.startsWith(prefix))) {
+							this.entries.delete(key);
+							this.documents.delete(key);
+						}
+					}
+				}
+				for (const entry of event.payload.created) {
+					this.entries.set(CodeScrimRecordingBuffer.resourceKey(entry.resource), CodeScrimRecordingBuffer.freezeEntry(entry));
+				}
+				break;
+			case 'editor.activeResourceChanged':
+				this.activeResource = event.payload.resource ? Object.freeze({ ...event.payload.resource }) : undefined;
+				this.selections = undefined;
+				break;
+			case 'editor.documentChanged': {
+				const key = CodeScrimRecordingBuffer.resourceKey(event.payload.resource);
+				if (event.payload.text !== undefined) {
+					this.documents.set(key, Object.freeze({
+						resource: Object.freeze({ ...event.payload.resource }),
+						languageId: event.payload.languageId,
+						versionId: event.payload.versionId,
+						eol: event.payload.eol,
+						text: event.payload.text,
+					}));
+				}
+				break;
+			}
+			case 'editor.selectionChanged':
+				this.activeResource = Object.freeze({ ...event.payload.resource });
+				this.selections = Object.freeze(event.payload.selections.map(selection => Object.freeze({ ...selection })));
+				break;
+			case 'editor.documentSaved':
+				break;
+		}
 	}
 
 	static resourceKey(resource: ICodeScrimWorkspaceResource): string {

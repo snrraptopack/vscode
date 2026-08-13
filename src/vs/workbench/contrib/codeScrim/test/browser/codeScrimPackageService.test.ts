@@ -64,11 +64,13 @@ function createDraft(): ICodeScrimRecordingDraft {
 	return {
 		id: 'package-service-test',
 		duration: 1_000,
-		checkpoint: {
+		checkpoints: [{
+			timestamp: 0,
+			eventIndex: 0,
 			documents: [{ resource: { root: 0, path: 'lesson.ts' }, languageId: 'typescript', versionId: 1, eol: '\n', text: 'let value = 1;' }],
 			entries: [{ resource: { root: 0, path: 'lesson.ts' }, type: 'file', size: 14, contents: 'bGV0IHZhbHVlID0gMTs=', text: true }],
 			skippedEntryCount: 0,
-		},
+		}],
 		events: [],
 	};
 }

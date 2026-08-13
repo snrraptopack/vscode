@@ -7,12 +7,26 @@ import { Event } from '../../../../base/common/event.js';
 import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
+import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
 
 export const CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID = 'codescrim.replayLastRecording';
 export const CODE_SCRIM_RESTART_REPLAY_COMMAND_ID = 'codescrim.restartReplay';
 export const CODE_SCRIM_RESUME_REPLAY_COMMAND_ID = 'codescrim.resumeReplay';
 export const CODE_SCRIM_STOP_REPLAY_COMMAND_ID = 'codescrim.stopReplay';
+
+export function findCodeScrimCheckpoint(checkpoints: readonly ICodeScrimRecordingCheckpoint[], target: number): ICodeScrimRecordingCheckpoint {
+	let low = 0;
+	let high = checkpoints.length - 1;
+	while (low < high) {
+		const middle = Math.ceil((low + high) / 2);
+		if (checkpoints[middle].timestamp <= target) {
+			low = middle;
+		} else {
+			high = middle - 1;
+		}
+	}
+	return checkpoints[low];
+}
 
 export type CodeScrimReplayState =
 	| { readonly status: 'idle' }
@@ -175,10 +189,13 @@ export class CodeScrimReplayCursor {
 		return this.nextIndex >= this.events.length;
 	}
 
-	reset(events: readonly CodeScrimRecordingEvent[]): void {
+	reset(events: readonly CodeScrimRecordingEvent[], nextIndex = 0, position = 0): void {
+		if (!Number.isSafeInteger(nextIndex) || nextIndex < 0 || nextIndex > events.length) {
+			throw new Error('The CodeScrim replay checkpoint has an invalid event index.');
+		}
 		this.events = events;
-		this.nextIndex = 0;
-		this.position = 0;
+		this.nextIndex = nextIndex;
+		this.position = Math.max(0, Math.round(position));
 	}
 
 	advance(position: number): readonly CodeScrimRecordingEvent[] {

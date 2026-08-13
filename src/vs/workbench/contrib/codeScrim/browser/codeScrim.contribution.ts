@@ -138,6 +138,7 @@ registerAction2(class extends Action2 {
 		const instantiationService = accessor.get(IInstantiationService);
 		const input = instantiationService.createInstance(CodeScrimCourseEditorInput);
 		await editorService.openEditor(input, { pinned: true });
+		return true;
 	}
 });
 

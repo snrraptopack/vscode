@@ -6,7 +6,7 @@ The CodeScrim package is the portable product asset. It must be deterministic, s
 
 ## Container
 
-The implemented `.scrim` v1 format is an opaque binary envelope:
+The implemented `.scrim` v2 format is an opaque binary envelope:
 
 ```text
 magic bytes: CODESCRM
@@ -17,7 +17,7 @@ encrypted payload: gzip-compressed AES-256-GCM ciphertext
 
 The public header contains only the container version, package ID, key ID, algorithms, nonce, and ciphertext length. Filenames, source code, event data, checkpoint metadata, and later media indexes remain inside authenticated ciphertext. Stable routing fields are supplied as AES-GCM additional authenticated data, so changing them invalidates the package.
 
-Inside the encrypted payload, large and repeated values use SHA-256 content-addressed blobs. The manifest references hashes instead of duplicating workspace bytes, document text, or event chunks. Events are currently indexed in chunks of 500; later packages can add creator and automatic checkpoint indexes without changing the outer envelope.
+Inside the encrypted payload, large and repeated values use SHA-256 content-addressed blobs. The manifest references hashes instead of duplicating workspace bytes, document text, checkpoint content, or event chunks. Events are indexed in chunks of 500 and the manifest requires an ordered instructor checkpoint index. There is intentionally no compatibility path for the pre-release v1 development format.
 
 The local authoring key is generated with Web Crypto and stored separately through VS Code's OS-backed secret storage. It is never embedded in the `.scrim` file or written into the instructor workspace. Published-course key envelopes and publisher signatures remain a later distribution layer.
 
@@ -99,7 +99,9 @@ A checkpoint contains enough state to seek without replaying from time zero:
 - browser URLs, context identifier, storage snapshot references, viewport, and selected DevTools state;
 - active chapter and exercise state.
 
-Checkpoints are created at creator markers and automatically according to time and event-volume thresholds.
+The recording buffer owns authoritative checkpoint state. It creates the timeline-zero checkpoint before the first event, automatic checkpoints after 30 seconds or 1,000 events, a checkpoint when recording is paused, and a final checkpoint when recording stops. Each checkpoint stores the first event index it does not contain, so same-timestamp event batches remain exact. Seeking binary-searches the nearest checkpoint at or before the target and replays only the remaining delta.
+
+Checkpoint document text and workspace bytes use the package's SHA-256 blob table, so unchanged files reuse existing blobs. Document text stays distinct from captured workspace bytes because it may represent unsaved editor state.
 
 ## Learner branches
 

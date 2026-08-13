@@ -9,6 +9,7 @@ import { mainWindow } from '../../../../base/browser/window.js';
 import { Button } from '../../../../base/browser/ui/button/button.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { IAction } from '../../../../base/common/actions.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
@@ -58,7 +59,6 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private filesModeButton: HTMLButtonElement | undefined;
 	private courseProgress: HTMLElement | undefined;
 	private contextPanel: HTMLElement | undefined;
-	private stage: HTMLElement | undefined;
 	private replayTabs: HTMLElement | undefined;
 	private editorHost: HTMLElement | undefined;
 	private codeEditor: CodeEditorWidget | undefined;
@@ -315,7 +315,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		);
 		this.contextRevealButton.hidden = true;
 
-		const content = this.stage = DOM.append(main, DOM.$('section.codescrim-session-stage', {
+		const content = DOM.append(main, DOM.$('section.codescrim-session-stage', {
 			'aria-label': localize('codeScrim.lessonStageAriaLabel', "Lesson session stage"),
 		}));
 		this.replayTabs = DOM.append(content, DOM.$('.codescrim-session-replay-tabs.show-file-icons', {
@@ -542,9 +542,11 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private showExperimentMenu(anchor: HTMLElement, experiment: ICodeScrimLearnerExperiment): void {
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => anchor,
-			getActions: () => [{
+			getActions: (): IAction[] => [{
 				id: 'codescrim.restoreInstructorExperiment',
 				label: localize('codeScrim.restoreInstructorExperiment', "Restore Instructor Version"),
+				tooltip: '',
+				class: undefined,
 				enabled: true,
 				run: () => {
 					this.closeExperimentReview();
@@ -553,11 +555,15 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			}, {
 				id: 'codescrim.keepLearnerExperiment',
 				label: localize('codeScrim.keepLearnerExperiment', "Keep Learner Version"),
+				tooltip: '',
+				class: undefined,
 				enabled: true,
 				run: () => this.dismissExperimentPopover(),
 			}, {
 				id: 'codescrim.deleteLearnerExperiment',
 				label: localize('codeScrim.deleteLearnerExperiment', "Delete Experiment"),
+				tooltip: '',
+				class: undefined,
 				enabled: true,
 				run: () => {
 					this.dismissExperimentPopover();

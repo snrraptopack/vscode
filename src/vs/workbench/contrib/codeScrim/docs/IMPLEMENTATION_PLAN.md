@@ -66,9 +66,9 @@ Status: in progress.
 - [x] Add a CodeScrim-owned floating authoring dock without using the Activity Bar view system.
 - [x] Keep automatic recovery outside the source workspace; create visible `.scrim` files only through Save As.
 - [x] Validate package framing, versions, paths, event ordering, payloads, expansion limits, and blob integrity before replay.
-- Add learner/instructor comparison to the future timeline-marker inspector.
+- [x] Add compact learner/instructor comparison to the selected timeline-marker inspector.
 - Add publisher signatures and account/course key envelopes for distributable packages.
-- Add indexed intermediate checkpoints so long seeks do not replay from time zero.
+- [x] Add required indexed intermediate checkpoints so long seeks restore the nearest snapshot instead of replaying from time zero.
 - Capture normalized diagnostic/marker snapshots on the session clock for deterministic squiggles and Problems state.
 - Keep captured instructor diagnostics separate from optional live diagnostics produced by a future learner sandbox.
 - [x] Enter learner edit mode immediately on editing and pause before the instructor timeline advances.
@@ -76,7 +76,7 @@ Status: in progress.
 - [x] Capture learner changes as an in-memory checkpoint, restore the paused instructor frame, and continue from the same timestamp.
 - [x] Render learner-edit markers on the playback timeline.
 - [x] Make a marker open the learner checkpoint captured at that position.
-- Offer Compare, Restore, and Keep actions from the selected marker inspector rather than interrupting normal playback.
+- [x] Offer Review, Restore, Keep, and Delete actions from the selected marker inspector rather than interrupting normal playback.
 - Persist named learner checkpoints and local Git-like history after marker semantics are stable.
 
 Acceptance criteria:
@@ -86,7 +86,7 @@ Acceptance criteria:
 - Replay writes are not captured as learner events.
 - A short native recording can be replayed without changing its final file contents or event ordering.
 
-Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, arbitrary seek, restart, manual file inspection, deterministic resume, and quiet learner experimentation now work for workspace and editor events. The starting tree captures portable file bytes under explicit safety limits; later additions, updates, deletions, active files, selections, and authoritative post-edit text anchors are timeline events. Replay owns an immutable instructor model plus a separately editable learner model for each materialized file. Editing pauses the instructor clock without adding another banner. Continue captures changed files in an in-memory learner checkpoint, silently restores the exact instructor frame, and resumes from that timestamp. Each captured experiment appears as a marker on the playback timeline; selecting it reconstructs the instructor frame, reapplies the saved learner checkpoint, and opens its first changed file. The Compare, Restore, and Keep marker inspector remains the next learner-history slice. Published key distribution/signatures, indexed intermediate checkpoints, captured diagnostics, and non-editor domains are intentionally not claimed yet.
+Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, checkpoint-indexed seek, restart, manual file inspection, deterministic resume, and quiet learner experimentation now work for workspace and editor events. The checkpoint index captures portable file bytes, unsaved document text, active files, and selections under explicit safety limits. Replay owns an immutable instructor model plus a separately editable learner model for each materialized file. Editing pauses the instructor clock without adding another banner. Continue captures changed files in an in-memory learner checkpoint, silently restores the exact instructor frame, and resumes from that timestamp. Each captured experiment appears as a marker on the playback timeline; its compact inspector provides native diff review plus Restore, Keep, and Delete actions. Published key distribution/signatures, captured diagnostics, and non-editor domains are intentionally not claimed yet.
 
 ## Milestone 3: Native browser integration
 
