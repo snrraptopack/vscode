@@ -112,8 +112,13 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	}
 
 	override setVisible(visible: boolean): void {
-		if (!visible && this.replayService.state.status !== 'idle') {
-			this.replayService.stop();
+		if (!visible) {
+			if (this.replayService.state.status !== 'idle') {
+				this.replayService.stop();
+			}
+			// The session controls creator-dock visibility. Clear it whenever this learner
+			// surface leaves the workbench, including tab switches and programmatic closes.
+			this.sessionService.closeLesson();
 		}
 		super.setVisible(visible);
 		this.layoutLease.value = visible ? this.layoutService.enterCodeScrimMode() : undefined;
@@ -245,6 +250,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		DOM.append(exitButton, DOM.$('span', undefined, localize('codeScrim.exitLesson', "Exit CodeScrim")));
 		this._register(DOM.addDisposableListener(exitButton, DOM.EventType.CLICK, () => {
 			this.replayService.stop();
+			this.sessionService.closeLesson();
 			if (this.input) {
 				void this.group.closeEditor(this.input);
 			}

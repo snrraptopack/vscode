@@ -6,27 +6,20 @@ The CodeScrim package is the portable product asset. It must be deterministic, s
 
 ## Container
 
-The planned `.scrim` v2 format is a ZIP-compatible container:
+The implemented `.scrim` v1 format is an opaque binary envelope:
 
 ```text
-lesson.scrim
-├── manifest.json
-├── checkpoints/
-│   ├── 000000.json
-│   └── 000001.json
-├── events/
-│   ├── 000000.ndjson
-│   └── 000001.ndjson
-├── blobs/
-│   └── <sha256>
-├── media/
-│   ├── narration.opus
-│   └── transcript.json
-└── indexes/
-    └── timeline.json
+magic bytes: CODESCRM
+header length: unsigned 32-bit big-endian integer
+public routing header: bounded UTF-8 JSON
+encrypted payload: gzip-compressed AES-256-GCM ciphertext
 ```
 
-Large payloads use content-addressed blobs. Manifest and index entries reference hashes rather than duplicating file contents.
+The public header contains only the container version, package ID, key ID, algorithms, nonce, and ciphertext length. Filenames, source code, event data, checkpoint metadata, and later media indexes remain inside authenticated ciphertext. Stable routing fields are supplied as AES-GCM additional authenticated data, so changing them invalidates the package.
+
+Inside the encrypted payload, large and repeated values use SHA-256 content-addressed blobs. The manifest references hashes instead of duplicating workspace bytes, document text, or event chunks. Events are currently indexed in chunks of 500; later packages can add creator and automatic checkpoint indexes without changing the outer envelope.
+
+The local authoring key is generated with Web Crypto and stored separately through VS Code's OS-backed secret storage. It is never embedded in the `.scrim` file or written into the instructor workspace. Published-course key envelopes and publisher signatures remain a later distribution layer.
 
 ## Manifest
 
@@ -42,7 +35,7 @@ Required conceptual fields:
 - chapters, exercises, and assistance policy;
 - integrity hashes and optional signature metadata.
 
-The concrete TypeScript schema will be added with the package service. This document deliberately avoids freezing field spelling before parser and migration tests exist.
+The concrete TypeScript schema is owned by `CodeScrimPackageCodec`. Readers validate the public frame, authenticate and decrypt the payload, enforce expansion limits, validate content hashes and portable paths, then normalize the current schema into `ICodeScrimRecordingDraft` before replay sees it.
 
 ## Time model
 

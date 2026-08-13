@@ -57,8 +57,16 @@ Status: in progress.
 - [x] Add arbitrary seek from the starting checkpoint.
 - [x] Pause playback when the learner inspects another replay file, then return to the instructor's active file on resume.
 - [x] Capture authoritative post-edit text anchors so intermediate reconstruction cannot drift from the instructor text.
+- [x] Persist the latest stopped draft outside the workspace as an atomic encrypted `.scrim` recovery package.
+- [x] Add a versioned binary envelope, AES-256-GCM authentication, gzip compression, and SHA-256 content-addressed blobs.
+- [x] Add minimal native Save Recording and Open Recording commands.
+- [x] Keep idle authoring controls out of the status bar; expose pause/resume and stop only during capture.
+- [x] Exclude paused authoring time and events from the recorded session clock.
+- [x] Add a CodeScrim-owned floating authoring dock without using the Activity Bar view system.
+- [x] Keep automatic recovery outside the source workspace; create visible `.scrim` files only through Save As.
+- [x] Validate package framing, versions, paths, event ordering, payloads, expansion limits, and blob integrity before replay.
 - Add a creator comparison action inside the learner experience.
-- Persist checkpoints and event chunks in a portable package.
+- Add publisher signatures and account/course key envelopes for distributable packages.
 - Add indexed intermediate checkpoints so long seeks do not replay from time zero.
 - Capture normalized diagnostic/marker snapshots on the session clock for deterministic squiggles and Problems state.
 - Keep captured instructor diagnostics separate from optional live diagnostics produced by a future learner sandbox.
@@ -72,7 +80,7 @@ Acceptance criteria:
 - Replay writes are not captured as learner events.
 - A short native recording can be replayed without changing its final file contents or event ordering.
 
-Current vertical-slice note: record, stop, learner preview, play, pause, arbitrary seek, restart, manual file inspection, and deterministic resume now work for workspace and editor events during one product process. The starting tree captures portable file bytes under explicit safety limits; later additions, updates, deletions, active files, selections, and authoritative post-edit text anchors are timeline events. Replay owns isolated Monaco models in the native learner surface, exposes a themed virtual tree and multi-file tabs, does not consult files that the instructor later changes or deletes, and cannot save into the creator workspace. Draft persistence, indexed checkpoints, captured diagnostics, learner edits/overlays, and non-editor domains are intentionally not claimed yet.
+Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, arbitrary seek, restart, manual file inspection, and deterministic resume now work for workspace and editor events. The starting tree captures portable file bytes under explicit safety limits; later additions, updates, deletions, active files, selections, and authoritative post-edit text anchors are timeline events. Replay owns isolated Monaco models in the native learner surface, exposes a themed virtual tree and multi-file tabs, does not consult files that the instructor later changes or deletes, and cannot save into the creator workspace. Published key distribution/signatures, indexed intermediate checkpoints, captured diagnostics, learner edits/overlays, and non-editor domains are intentionally not claimed yet.
 
 ## Milestone 3: Native browser integration
 

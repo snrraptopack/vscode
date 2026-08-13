@@ -72,7 +72,7 @@ Reason: global workbench layout actions can split or squeeze the coordinated les
 
 Status: accepted.
 
-Creator recording does not open a simulated editor or a dedicated recording page. Native adapters observe the real workbench while the creator edits normally. A compact status-bar entry indicates that recording is active and provides the stop action.
+Creator recording does not open a simulated editor or a dedicated recording page. Native adapters observe the real workbench while the creator edits normally. Authoring actions live in a CodeScrim-owned floating dock opened from a circular bottom-left launcher; the dock is not an Activity Bar container and does not alter editor layout. The status bar is quiet while idle and exposes only active capture state, pause/resume, and stop while recording.
 
 The first adapter records only resources inside an open workspace and serializes them as a workspace-root index plus a relative path. External absolute paths are not added to a draft.
 
@@ -113,3 +113,11 @@ Previewing or replaying an instructor recording opens the same native lesson exp
 The creator can inspect the replay tree and timeline, compare a replay file with the current source file, and validate the course navigation, lesson context, transport, and workbench behavior exactly as a learner will receive them. Starting a new recording first closes the transient preview state. Closing the window disposes transient virtual models, while explicitly saved recording packages remain in CodeScrim-owned storage outside the project.
 
 Reason: creator preview must exercise the real learner path without polluting Git, file watchers, imports, search results, or a later recording with temporary files.
+
+## CS-015: Packages are opaque authenticated binary envelopes
+
+Status: accepted.
+
+The `.scrim` container exposes only a bounded routing header. The session manifest, source files, checkpoints, events, and media indexes are compressed and encrypted with AES-256-GCM; repeated content is addressed by SHA-256 inside the encrypted payload. The local authoring key is held separately by OS-backed secret storage, and package writes commit through an atomic sibling-file move.
+
+Reason: renaming JSON or placing it in ZIP would discourage only casual inspection and would expose source filenames and metadata. Authenticated encryption makes ordinary extraction meaningless and detects tampering before untrusted data enters replay. Separating the key from the package also leaves a clean boundary for future account entitlements, course key envelopes, key rotation, and publisher signatures.

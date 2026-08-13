@@ -215,6 +215,12 @@ export interface FileFilter {
 export interface ISaveDialogOptions {
 
 	/**
+	 * Forces the operating-system save dialog when the current host supports it.
+	 * Browser hosts ignore this option and continue to use the workbench dialog.
+	 */
+	readonly forceNative?: boolean;
+
+	/**
 	 * A human-readable string for the dialog title
 	 */
 	title?: string;
@@ -243,6 +249,12 @@ export interface ISaveDialogOptions {
 }
 
 export interface IOpenDialogOptions {
+
+	/**
+	 * Forces the operating-system open dialog when the current host supports it.
+	 * Browser hosts ignore this option and continue to use the workbench dialog.
+	 */
+	readonly forceNative?: boolean;
 
 	/**
 	 * A human-readable string for the dialog title

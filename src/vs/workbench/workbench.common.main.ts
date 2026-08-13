@@ -246,6 +246,9 @@ import './contrib/imageCarousel/browser/imageCarousel.contribution.js';
 // Interactive
 import './contrib/interactive/browser/interactive.contribution.js';
 
+// CodeScrim
+import './contrib/codeScrim/browser/codeScrim.contribution.js';
+
 // repl
 import './contrib/replNotebook/browser/repl.contribution.js';
 

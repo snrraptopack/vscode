@@ -1,0 +1,178 @@
+.codescrim-authoring-shell {
+	position: absolute;
+	z-index: 1000;
+	bottom: 12px;
+	left: 12px;
+	display: flex;
+	align-items: flex-start;
+	flex-direction: column;
+	gap: 10px;
+	pointer-events: none;
+}
+
+.codescrim-authoring-shell[hidden],
+.codescrim-authoring-dock[hidden] {
+	display: none;
+}
+
+.codescrim-authoring-launcher,
+.codescrim-authoring-dock {
+	pointer-events: auto;
+}
+
+.codescrim-authoring-launcher {
+	display: flex;
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid var(--vscode-button-border, var(--vscode-widget-border));
+	border-radius: 50%;
+	background: var(--vscode-editorWidget-background);
+	box-shadow: 0 3px 12px var(--vscode-widget-shadow);
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+}
+
+.codescrim-authoring-launcher:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.codescrim-authoring-launcher:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+.codescrim-authoring-launcher .codicon {
+	font-size: 21px;
+}
+
+.codescrim-authoring-shell.recording .codescrim-authoring-launcher {
+	border-color: #ff0000;
+	background: #ff0000;
+	color: #ffffff;
+	animation: codescrim-recording-pulse 1.8s ease-in-out infinite;
+}
+
+.codescrim-authoring-shell.recording .codescrim-authoring-launcher:hover {
+	border-color: #cc0000;
+	background: #cc0000;
+	color: #ffffff;
+}
+
+.codescrim-authoring-shell.paused .codescrim-authoring-launcher {
+	border-color: var(--vscode-editorWarning-foreground);
+}
+
+.codescrim-authoring-dock {
+	box-sizing: border-box;
+	width: min(340px, calc(100vw - 24px));
+	max-height: min(570px, calc(100vh - 110px));
+	overflow: auto;
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: var(--vscode-cornerRadius-large);
+	background: var(--vscode-sideBar-background);
+	box-shadow: 0 8px 28px var(--vscode-widget-shadow);
+	color: var(--vscode-sideBar-foreground);
+}
+
+.codescrim-authoring-content {
+	display: flex;
+	padding: 18px;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.codescrim-authoring-header,
+.codescrim-authoring-identity,
+.codescrim-authoring-status {
+	display: flex;
+	align-items: center;
+}
+
+.codescrim-authoring-header {
+	justify-content: space-between;
+}
+
+.codescrim-authoring-identity {
+	gap: 10px;
+}
+
+.codescrim-authoring-identity > .codicon {
+	color: var(--vscode-textLink-foreground);
+	font-size: 20px;
+}
+
+.codescrim-authoring-title,
+.codescrim-authoring-status-copy {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.codescrim-authoring-title strong {
+	font-size: 15px;
+}
+
+.codescrim-authoring-title span,
+.codescrim-authoring-status-copy span {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.codescrim-authoring-status {
+	min-height: 62px;
+	padding: 0 12px;
+	gap: 10px;
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: var(--vscode-editor-background);
+}
+
+.codescrim-authoring-status-dot {
+	width: 9px;
+	height: 9px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	background: var(--vscode-descriptionForeground);
+}
+
+.codescrim-authoring-shell.recording .codescrim-authoring-status-dot {
+	background: #ff0000;
+}
+
+.codescrim-authoring-shell.paused .codescrim-authoring-status-dot {
+	background: var(--vscode-editorWarning-foreground);
+}
+
+.codescrim-authoring-shell.has-draft .codescrim-authoring-status-dot {
+	background: var(--vscode-testing-iconPassed);
+}
+
+.codescrim-authoring-button {
+	width: 100%;
+}
+
+.codescrim-authoring-action-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.codescrim-authoring-divider {
+	height: 1px;
+	margin: 2px 0;
+	background: var(--vscode-panel-border);
+}
+
+.codescrim-danger-button:not(.disabled) {
+	color: var(--vscode-errorForeground);
+}
+
+@keyframes codescrim-recording-pulse {
+	0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, #ff0000 45%, transparent); }
+	50% { box-shadow: 0 0 0 7px transparent; }
+}

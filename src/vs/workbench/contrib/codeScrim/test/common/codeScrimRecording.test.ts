@@ -149,4 +149,20 @@ suite('CodeScrimRecordingBuffer', () => {
 		buffer.start('draft-three', 0);
 		assert.throws(() => buffer.start('draft-four', 1), /already active/);
 	});
+
+	test('excludes paused time while preserving event sequence', () => {
+		const buffer = new CodeScrimRecordingBuffer();
+		buffer.start('draft-paused', 100);
+		buffer.append({ domain: 'editor', kind: 'editor.activeResourceChanged', payload: {} }, 110);
+
+		assert.strictEqual(buffer.pause(115), true);
+		assert.strictEqual(buffer.pause(120), false);
+		assert.strictEqual(buffer.resume(145), true);
+		const resumed = buffer.append({ domain: 'editor', kind: 'editor.activeResourceChanged', payload: {} }, 150);
+		const draft = buffer.stop(160);
+
+		assert.strictEqual(resumed.timestamp, 20_000);
+		assert.strictEqual(resumed.sequence, 1);
+		assert.strictEqual(draft?.duration, 30_000);
+	});
 });

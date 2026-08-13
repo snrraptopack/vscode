@@ -4,7 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { localize, localize2 } from '../../../../nls.js';
+import { Schemas } from '../../../../base/common/network.js';
+import { basename, extname, joinPath } from '../../../../base/common/resources.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
@@ -15,20 +19,24 @@ import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/
 import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
-import { CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService } from '../common/codeScrimRecording.js';
+import { CODE_SCRIM_OPEN_RECORDING_COMMAND_ID, CODE_SCRIM_PACKAGE_EXTENSION, CODE_SCRIM_SAVE_RECORDING_COMMAND_ID, ICodeScrimPackageService } from '../common/codeScrimPackage.js';
+import { CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft } from '../common/codeScrimRecording.js';
 import { CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID, CODE_SCRIM_RESTART_REPLAY_COMMAND_ID, CODE_SCRIM_RESUME_REPLAY_COMMAND_ID, CODE_SCRIM_STOP_REPLAY_COMMAND_ID, ICodeScrimReplayService } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, CODE_SCRIM_OPEN_DEMO_LESSON_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimLessonDescriptor, ICodeScrimSessionService } from '../common/codeScrimSession.js';
 import { CodeScrimCourseEditor } from './codeScrimCourseEditor.js';
 import { CodeScrimCourseEditorInput } from './codeScrimCourseEditorInput.js';
+import { CodeScrimAuthoringDockContribution } from './codeScrimAuthoringDock.js';
 import { CodeScrimLayoutService } from './codeScrimLayoutService.js';
 import { CodeScrimLessonEditor } from './codeScrimLessonEditor.js';
 import { CodeScrimLessonEditorInput } from './codeScrimLessonEditorInput.js';
+import { CodeScrimPackageService } from './codeScrimPackageService.js';
 import { CodeScrimRecorderService } from './codeScrimRecorderService.js';
 import { CodeScrimReplayService } from './codeScrimReplayService.js';
 import { CodeScrimSessionService } from './codeScrimSessionService.js';
 
 registerSingleton(ICodeScrimSessionService, CodeScrimSessionService, InstantiationType.Delayed);
 registerSingleton(ICodeScrimLayoutService, CodeScrimLayoutService, InstantiationType.Delayed);
+registerSingleton(ICodeScrimPackageService, CodeScrimPackageService, InstantiationType.Delayed);
 registerSingleton(ICodeScrimRecorderService, CodeScrimRecorderService, InstantiationType.Eager);
 registerSingleton(ICodeScrimReplayService, CodeScrimReplayService, InstantiationType.Delayed);
 
@@ -36,14 +44,17 @@ class CodeScrimRecordingControlsContribution {
 
 	static readonly ID = 'workbench.contrib.codeScrimRecordingControls';
 
-	constructor(@ICodeScrimRecorderService recorderService: ICodeScrimRecorderService) {
+	constructor(
+		@ICodeScrimRecorderService recorderService: ICodeScrimRecorderService,
+	) {
 		// Resolve the recorder after workbench restoration so its native controls and listeners are
 		// available without requiring the command palette to instantiate the service first.
-		void recorderService;
+		void recorderService.initialize();
 	}
 }
 
 registerWorkbenchContribution2(CodeScrimRecordingControlsContribution.ID, CodeScrimRecordingControlsContribution, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(CodeScrimAuthoringDockContribution.ID, CodeScrimAuthoringDockContribution, WorkbenchPhase.AfterRestored);
 
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
 	EditorPaneDescriptor.create(
@@ -122,11 +133,103 @@ registerAction2(class extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor): Promise<void> {
+	async run(accessor: ServicesAccessor): Promise<boolean> {
 		const editorService = accessor.get(IEditorService);
 		const instantiationService = accessor.get(IInstantiationService);
 		const input = instantiationService.createInstance(CodeScrimCourseEditorInput);
 		await editorService.openEditor(input, { pinned: true });
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: CODE_SCRIM_SAVE_RECORDING_COMMAND_ID,
+			title: localize2('codeScrim.saveRecording', "Save Recording"),
+			category: localize2('codeScrim.category', "CodeScrim"),
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<boolean> {
+		const recorderService = accessor.get(ICodeScrimRecorderService);
+		const packageService = accessor.get(ICodeScrimPackageService);
+		const fileDialogService = accessor.get(IFileDialogService);
+		const notificationService = accessor.get(INotificationService);
+		await recorderService.initialize();
+		const draft = recorderService.lastDraft;
+		if (!draft) {
+			notificationService.info(localize('codeScrim.noRecordingToSave', "Record and stop a CodeScrim session before saving it."));
+			return false;
+		}
+
+		const defaultFolder = await fileDialogService.defaultFilePath(Schemas.file);
+		let resource = await fileDialogService.showSaveDialog({
+			forceNative: true,
+			title: localize('codeScrim.saveRecordingDialogTitle', "Save CodeScrim Recording"),
+			saveLabel: localize('codeScrim.saveRecordingDialogLabel', "Save Recording"),
+			defaultUri: joinPath(defaultFolder, `recording-${draft.id.slice(0, 8)}.${CODE_SCRIM_PACKAGE_EXTENSION}`),
+			filters: [{ name: localize('codeScrim.packageFileFilter', "CodeScrim Recording"), extensions: [CODE_SCRIM_PACKAGE_EXTENSION] }],
+			availableFileSystems: [Schemas.file],
+		});
+		if (!resource) {
+			return false;
+		}
+		if (extname(resource).toLowerCase() !== `.${CODE_SCRIM_PACKAGE_EXTENSION}`) {
+			resource = resource.with({ path: `${resource.path}.${CODE_SCRIM_PACKAGE_EXTENSION}` });
+		}
+
+		await packageService.savePackage(resource, draft);
+		notificationService.info(localize('codeScrim.recordingSaved', "CodeScrim recording saved as {0}.", basename(resource)));
+		return true;
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: CODE_SCRIM_OPEN_RECORDING_COMMAND_ID,
+			title: localize2('codeScrim.openRecording', "Open Recording"),
+			category: localize2('codeScrim.category', "CodeScrim"),
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const recorderService = accessor.get(ICodeScrimRecorderService);
+		const packageService = accessor.get(ICodeScrimPackageService);
+		const fileDialogService = accessor.get(IFileDialogService);
+		const notificationService = accessor.get(INotificationService);
+		if (recorderService.state.status !== 'idle') {
+			notificationService.info(localize('codeScrim.stopRecordingBeforeOpen', "Stop the active CodeScrim recording before opening another recording."));
+			return;
+		}
+
+		const resources = await fileDialogService.showOpenDialog({
+			forceNative: true,
+			title: localize('codeScrim.openRecordingDialogTitle', "Open CodeScrim Recording"),
+			openLabel: localize('codeScrim.openRecordingDialogLabel', "Open Recording"),
+			canSelectFiles: true,
+			canSelectFolders: false,
+			canSelectMany: false,
+			filters: [{ name: localize('codeScrim.packageFileFilter', "CodeScrim Recording"), extensions: [CODE_SCRIM_PACKAGE_EXTENSION] }],
+			availableFileSystems: [Schemas.file],
+		});
+		const resource = resources?.[0];
+		if (!resource) {
+			return;
+		}
+
+		try {
+			const draft = await packageService.openPackage(resource);
+			// Opening a package establishes the current authoring context, so the same verified
+			// recording must be available after restart rather than an older recovery draft.
+			await packageService.saveDraft(draft);
+			recorderService.setLastDraft(draft);
+			notificationService.info(localize('codeScrim.recordingOpened', "Opened and verified CodeScrim recording {0}. It is ready to replay.", basename(resource)));
+		} catch (error) {
+			notificationService.error(error);
+		}
 	}
 });
 
@@ -146,6 +249,7 @@ registerAction2(class extends Action2 {
 		const notificationService = accessor.get(INotificationService);
 		const editorService = accessor.get(IEditorService);
 		const instantiationService = accessor.get(IInstantiationService);
+		await recorderService.initialize();
 		if (recorderService.state.status !== 'idle') {
 			notificationService.info(localize('codeScrim.stopRecordingBeforeReplay', "Stop the active CodeScrim recording before replaying it."));
 			return;
@@ -157,13 +261,7 @@ registerAction2(class extends Action2 {
 			return;
 		}
 
-		const previewLesson: ICodeScrimLessonDescriptor = {
-			id: `recording-preview-${draft.id}`,
-			title: localize('codeScrim.recordingPreviewTitle', "Recording Preview"),
-			description: localize('codeScrim.recordingPreviewDescription', "Preview this recording through the learner lesson experience."),
-			duration: Math.ceil(draft.duration / 1000),
-		};
-		await editorService.openEditor(instantiationService.createInstance(CodeScrimLessonEditorInput, previewLesson), { pinned: true });
+		await openRecordingPreview(editorService, instantiationService, draft);
 		if (await replayService.replay(draft)) {
 			notificationService.info(localize('codeScrim.replayStarted', "Replaying the last CodeScrim recording in isolated editor models."));
 		}
@@ -234,9 +332,33 @@ registerAction2(class extends Action2 {
 		const recorderService = accessor.get(ICodeScrimRecorderService);
 		const replayService = accessor.get(ICodeScrimReplayService);
 		const notificationService = accessor.get(INotificationService);
+		const dialogService = accessor.get(IDialogService);
+		const commandService = accessor.get(ICommandService);
 		if (replayService.state.status !== 'idle') {
 			notificationService.info(localize('codeScrim.stopReplayBeforeRecording', "Stop the active CodeScrim replay before starting a recording."));
 			return;
+		}
+		await recorderService.initialize();
+		if (recorderService.lastDraft) {
+			const { result } = await dialogService.prompt({
+				type: 'info',
+				message: localize('codeScrim.replaceDraftPrompt', "A recording is already ready. What should CodeScrim do before starting a new one?"),
+				detail: localize('codeScrim.replaceDraftDetail', "Saving exports a named .scrim package. Discarding removes the restart-recovery copy."),
+				buttons: [
+					{ label: localize('codeScrim.saveThenRecord', "Save, then Record"), run: () => 'save' as const },
+					{ label: localize('codeScrim.discardThenRecord', "Discard and Record"), run: () => 'discard' as const },
+				],
+				cancelButton: true,
+			});
+			if (result === 'save') {
+				if (!await commandService.executeCommand<boolean>(CODE_SCRIM_SAVE_RECORDING_COMMAND_ID)) {
+					return;
+				}
+			} else if (result === 'discard') {
+				await recorderService.discardLastDraft();
+			} else {
+				return;
+			}
 		}
 		let started = false;
 		try {
@@ -252,6 +374,49 @@ registerAction2(class extends Action2 {
 			}
 		} else {
 			notificationService.info(localize('codeScrim.recordingAlreadyActive', "A CodeScrim recording is already active."));
+		}
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, title: localize2('codeScrim.pauseRecording', "Pause Recording"), category: localize2('codeScrim.category', "CodeScrim"), f1: true });
+	}
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(ICodeScrimRecorderService).pauseRecording();
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, title: localize2('codeScrim.resumeRecording', "Resume Recording"), category: localize2('codeScrim.category', "CodeScrim"), f1: true });
+	}
+	run(accessor: ServicesAccessor): void {
+		accessor.get(ICodeScrimRecorderService).resumeRecording();
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID, title: localize2('codeScrim.discardRecording', "Discard Current Recording"), category: localize2('codeScrim.category', "CodeScrim"), f1: true });
+	}
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const recorderService = accessor.get(ICodeScrimRecorderService);
+		const notificationService = accessor.get(INotificationService);
+		const dialogService = accessor.get(IDialogService);
+		await recorderService.initialize();
+		if (!recorderService.lastDraft) {
+			notificationService.info(localize('codeScrim.noRecordingToDiscard', "There is no CodeScrim recording to discard."));
+			return;
+		}
+		const confirmed = await dialogService.confirm({
+			type: 'warning',
+			message: localize('codeScrim.discardRecordingConfirm', "Discard the current CodeScrim recording?"),
+			detail: localize('codeScrim.discardRecordingDetail', "This removes the local restart-recovery copy. Exported .scrim files are not affected."),
+			primaryButton: localize('codeScrim.discardRecordingButton', "Discard Recording"),
+		});
+		if (confirmed.confirmed && await recorderService.discardLastDraft()) {
+			notificationService.info(localize('codeScrim.recordingDiscarded', "CodeScrim recording discarded."));
 		}
 	}
 });
@@ -301,6 +466,16 @@ registerAction2(class extends Action2 {
 		await editorService.openEditor(input, { pinned: true });
 	}
 });
+
+async function openRecordingPreview(editorService: IEditorService, instantiationService: IInstantiationService, draft: ICodeScrimRecordingDraft): Promise<void> {
+	const previewLesson: ICodeScrimLessonDescriptor = {
+		id: `recording-preview-${draft.id}`,
+		title: localize('codeScrim.recordingPreviewTitle', "Recording Preview"),
+		description: localize('codeScrim.recordingPreviewDescription', "Preview this recording through the learner lesson experience."),
+		duration: Math.ceil(draft.duration / 1000),
+	};
+	await editorService.openEditor(instantiationService.createInstance(CodeScrimLessonEditorInput, previewLesson), { pinned: true });
+}
 
 function parseLessonDescriptor(serializedEditor: string): ICodeScrimLessonDescriptor | undefined {
 	try {

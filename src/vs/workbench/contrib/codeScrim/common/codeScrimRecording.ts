@@ -8,6 +8,9 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 
 export const CODE_SCRIM_START_RECORDING_COMMAND_ID = 'codescrim.startRecording';
 export const CODE_SCRIM_STOP_RECORDING_COMMAND_ID = 'codescrim.stopRecording';
+export const CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID = 'codescrim.pauseRecording';
+export const CODE_SCRIM_RESUME_RECORDING_COMMAND_ID = 'codescrim.resumeRecording';
+export const CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID = 'codescrim.discardRecording';
 
 export interface ICodeScrimWorkspaceResource {
 	readonly root: number;
@@ -102,7 +105,7 @@ export interface ICodeScrimRecordingDraft {
 export type CodeScrimRecordingState =
 	| { readonly status: 'idle' }
 	| { readonly status: 'preparing' }
-	| { readonly status: 'recording'; readonly draftId: string; readonly eventCount: number; readonly checkpointEntryCount: number; readonly skippedEntryCount: number };
+	| { readonly status: 'recording' | 'paused'; readonly draftId: string; readonly eventCount: number; readonly checkpointEntryCount: number; readonly skippedEntryCount: number };
 
 /**
  * Host-neutral append-only event buffer. The caller supplies monotonic milliseconds; the buffer
@@ -112,6 +115,8 @@ export class CodeScrimRecordingBuffer {
 
 	private draftId: string | undefined;
 	private startedAt = 0;
+	private pausedAt: number | undefined;
+	private pausedDuration = 0;
 	private sequence = 0;
 	private readonly events: CodeScrimRecordingEvent[] = [];
 	private readonly documents = new Map<string, ICodeScrimDocumentCheckpoint>();
@@ -138,6 +143,10 @@ export class CodeScrimRecordingBuffer {
 		return this.draftId;
 	}
 
+	get isPaused(): boolean {
+		return this.pausedAt !== undefined;
+	}
+
 	start(draftId: string, now: number): void {
 		if (this.isRecording) {
 			throw new Error('A CodeScrim recording is already active.');
@@ -148,11 +157,30 @@ export class CodeScrimRecordingBuffer {
 
 		this.draftId = draftId;
 		this.startedAt = now;
+		this.pausedAt = undefined;
+		this.pausedDuration = 0;
 		this.sequence = 0;
 		this.events.length = 0;
 		this.documents.clear();
 		this.entries.clear();
 		this.skippedEntries = 0;
+	}
+
+	pause(now: number): boolean {
+		if (!this.draftId || this.pausedAt !== undefined) {
+			return false;
+		}
+		this.pausedAt = now;
+		return true;
+	}
+
+	resume(now: number): boolean {
+		if (!this.draftId || this.pausedAt === undefined) {
+			return false;
+		}
+		this.pausedDuration += Math.max(0, now - this.pausedAt);
+		this.pausedAt = undefined;
+		return true;
 	}
 
 	captureDocument(document: ICodeScrimDocumentCheckpoint): void {
@@ -230,6 +258,8 @@ export class CodeScrimRecordingBuffer {
 		});
 		this.draftId = undefined;
 		this.startedAt = 0;
+		this.pausedAt = undefined;
+		this.pausedDuration = 0;
 		this.sequence = 0;
 		this.events.length = 0;
 		this.documents.clear();
@@ -247,7 +277,8 @@ export class CodeScrimRecordingBuffer {
 	}
 
 	private toMicroseconds(now: number): number {
-		return Math.round(Math.max(0, now - this.startedAt) * 1000);
+		const effectiveNow = this.pausedAt ?? now;
+		return Math.round(Math.max(0, effectiveNow - this.startedAt - this.pausedDuration) * 1000);
 	}
 }
 
@@ -258,7 +289,13 @@ export interface ICodeScrimRecorderService {
 	readonly state: CodeScrimRecordingState;
 	readonly lastDraft: ICodeScrimRecordingDraft | undefined;
 	readonly onDidChangeState: Event<CodeScrimRecordingState>;
+	readonly onDidChangeDraft: Event<ICodeScrimRecordingDraft | undefined>;
 
+	initialize(): Promise<void>;
 	startRecording(): Promise<boolean>;
+	pauseRecording(): Promise<boolean>;
+	resumeRecording(): boolean;
 	stopRecording(): Promise<ICodeScrimRecordingDraft | undefined>;
+	setLastDraft(draft: ICodeScrimRecordingDraft): void;
+	discardLastDraft(): Promise<boolean>;
 }

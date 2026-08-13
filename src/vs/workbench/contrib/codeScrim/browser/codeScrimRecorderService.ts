@@ -21,8 +21,8 @@ import { EditorResourceAccessor, SideBySideEditor } from '../../../common/editor
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
-import { CodeScrimRecordingBuffer, CodeScrimRecordingEventData, CodeScrimRecordingState, CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
-import { CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID, ICodeScrimReplayService } from '../common/codeScrimReplay.js';
+import { ICodeScrimPackageService } from '../common/codeScrimPackage.js';
+import { CodeScrimRecordingBuffer, CodeScrimRecordingEventData, CodeScrimRecordingState, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 
 const MAX_CHECKPOINT_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_CHECKPOINT_TOTAL_SIZE = 64 * 1024 * 1024;
@@ -42,13 +42,16 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 	private readonly buffer = new CodeScrimRecordingBuffer();
 	private readonly recordingListeners = this._register(new MutableDisposable<DisposableStore>());
 	private readonly recordingStatus = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
-	private readonly replayDraftStatus = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
+	private readonly stopRecordingStatus = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
 	private _state: CodeScrimRecordingState = Object.freeze({ status: 'idle' });
 	private _lastDraft: ICodeScrimRecordingDraft | undefined;
+	private initialization: Promise<void> | undefined;
 	private pendingWorkspaceChanges: Promise<void> = Promise.resolve();
 	private readonly knownWorkspaceResources = new Set<string>();
 	private readonly _onDidChangeState = this._register(new Emitter<CodeScrimRecordingState>());
 	readonly onDidChangeState = this._onDidChangeState.event;
+	private readonly _onDidChangeDraft = this._register(new Emitter<ICodeScrimRecordingDraft | undefined>());
+	readonly onDidChangeDraft = this._onDidChangeDraft.event;
 
 	get state(): CodeScrimRecordingState {
 		return this._state;
@@ -63,18 +66,27 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		@IEditorService private readonly editorService: IEditorService,
 		@IFileService private readonly fileService: IFileService,
 		@IModelService private readonly modelService: IModelService,
-		@ICodeScrimReplayService private readonly replayService: ICodeScrimReplayService,
+		@ICodeScrimPackageService private readonly packageService: ICodeScrimPackageService,
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
 		@ITextFileService private readonly textFileService: ITextFileService,
 		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
-		this._register(this.replayService.onDidChangeState(() => this.syncStatusbar()));
 		this.syncStatusbar();
 	}
 
+	initialize(): Promise<void> {
+		return this.initialization ??= this.restoreLastDraft();
+	}
+
+	setLastDraft(draft: ICodeScrimRecordingDraft): void {
+		this._lastDraft = draft;
+		this._onDidChangeDraft.fire(draft);
+	}
+
 	async startRecording(): Promise<boolean> {
+		await this.initialize();
 		if (this._state.status !== 'idle') {
 			return false;
 		}
@@ -117,6 +129,27 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		}
 	}
 
+	async pauseRecording(): Promise<boolean> {
+		if (!this.buffer.pause(this.now())) {
+			return false;
+		}
+		this.recordingListeners.clear();
+		await this.pendingWorkspaceChanges;
+		this.publishState();
+		return true;
+	}
+
+	resumeRecording(): boolean {
+		if (!this.buffer.resume(this.now())) {
+			return false;
+		}
+		// Listeners are recreated because pause intentionally detached every event source.
+		this.recordingListeners.value = this.createRecordingListeners(false);
+		this.recordActiveResource();
+		this.publishState();
+		return true;
+	}
+
 	async stopRecording(): Promise<ICodeScrimRecordingDraft | undefined> {
 		if (!this.buffer.isRecording) {
 			return undefined;
@@ -125,15 +158,41 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		this.recordingListeners.clear();
 		this.recordingStatus.clear();
 		await this.pendingWorkspaceChanges;
-		const draft = this._lastDraft = this.buffer.stop(this.now());
+		const draft = this.buffer.stop(this.now());
+		if (draft) {
+			this._lastDraft = draft;
+			this._onDidChangeDraft.fire(draft);
+		}
 		this.publishState();
+		if (draft) {
+			// The recorder is already safely idle if persistence fails, and the in-memory draft remains replayable.
+			await this.packageService.saveDraft(draft);
+		}
 		return draft;
 	}
 
-	private createRecordingListeners(): DisposableStore {
+	async discardLastDraft(): Promise<boolean> {
+		if (this._state.status !== 'idle' || !this._lastDraft) {
+			return false;
+		}
+		await this.packageService.deleteDraft();
+		this._lastDraft = undefined;
+		this._onDidChangeDraft.fire(undefined);
+		return true;
+	}
+
+	private async restoreLastDraft(): Promise<void> {
+		const draft = await this.packageService.loadDraft();
+		if (draft && !this._lastDraft) {
+			this._lastDraft = draft;
+			this._onDidChangeDraft.fire(draft);
+		}
+	}
+
+	private createRecordingListeners(captureExistingAsCheckpoint = true): DisposableStore {
 		const listeners = new DisposableStore();
 		for (const model of this.modelService.getModels()) {
-			this.listenToModel(model, listeners, true);
+			this.listenToModel(model, listeners, captureExistingAsCheckpoint);
 		}
 		listeners.add(this.modelService.onModelAdded(model => this.listenToModel(model, listeners, false)));
 		listeners.add(this.editorService.onDidActiveEditorChange(() => this.recordActiveResource()));
@@ -248,7 +307,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 	}
 
 	private append(event: CodeScrimRecordingEventData): void {
-		if (!this.buffer.isRecording) {
+		if (!this.buffer.isRecording || this.buffer.isPaused) {
 			return;
 		}
 
@@ -257,7 +316,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 	}
 
 	private async recordWorkspaceChanges(event: FileChangesEvent): Promise<void> {
-		if (!this.buffer.isRecording) {
+		if (!this.buffer.isRecording || this.buffer.isPaused) {
 			return;
 		}
 
@@ -400,7 +459,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		const draftId = this.buffer.activeDraftId;
 		this._state = draftId
 			? Object.freeze({
-				status: 'recording',
+				status: this.buffer.isPaused ? 'paused' : 'recording',
 				draftId,
 				eventCount: this.buffer.eventCount,
 				checkpointEntryCount: this.buffer.checkpointEntryCount,
@@ -424,25 +483,9 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 	}
 
 	private syncStatusbar(): void {
-		this.syncReplayDraftStatus();
-		if (this._state.status === 'idle' && this.replayService.state.status !== 'idle') {
-			this.recordingStatus.clear();
-			return;
-		}
-
 		if (this._state.status === 'idle') {
-			const entry = {
-				name: localize('codeScrim.recordControlName', "CodeScrim Record"),
-				text: '$(record) ' + localize('codeScrim.recordControlText', "Record"),
-				ariaLabel: localize('codeScrim.recordControlAriaLabel', "Start a CodeScrim recording"),
-				tooltip: localize('codeScrim.recordControlTooltip', "Start CodeScrim recording"),
-				command: CODE_SCRIM_START_RECORDING_COMMAND_ID,
-			};
-			if (this.recordingStatus.value) {
-				this.recordingStatus.value.update(entry);
-			} else {
-				this.recordingStatus.value = this.statusbarService.addEntry(entry, 'status.codescrimRecording', StatusbarAlignment.RIGHT, 100);
-			}
+			this.recordingStatus.clear();
+			this.stopRecordingStatus.clear();
 			return;
 		}
 
@@ -458,41 +501,40 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 			} else {
 				this.recordingStatus.value = this.statusbarService.addEntry(entry, 'status.codescrimRecording', StatusbarAlignment.RIGHT, 100);
 			}
+			this.stopRecordingStatus.clear();
 			return;
 		}
 
+		const paused = this._state.status === 'paused';
 		const entry = {
 			name: localize('codeScrim.recordingStatusName', "CodeScrim Recording"),
-			text: '$(record) ' + localize('codeScrim.recordingStatusText', "Recording · {0} events", this._state.eventCount),
-			ariaLabel: localize('codeScrim.recordingStatusAriaLabel', "CodeScrim is recording. {0} editor events captured. Click to stop.", this._state.eventCount),
-			tooltip: localize('codeScrim.recordingStatusTooltip', "Stop CodeScrim recording"),
-			kind: 'error' as const,
-			command: CODE_SCRIM_STOP_RECORDING_COMMAND_ID,
+			text: paused
+				? '$(debug-continue) ' + localize('codeScrim.pausedStatusText', "Resume recording - {0} events", this._state.eventCount)
+				: '$(debug-pause) ' + localize('codeScrim.recordingStatusText', "Pause recording - {0} events", this._state.eventCount),
+			ariaLabel: paused
+				? localize('codeScrim.pausedStatusAriaLabel', "CodeScrim recording paused with {0} events. Click to resume.", this._state.eventCount)
+				: localize('codeScrim.recordingStatusAriaLabel', "CodeScrim is recording. {0} events captured. Click to pause.", this._state.eventCount),
+			tooltip: paused ? localize('codeScrim.resumeRecordingTooltip', "Resume recording") : localize('codeScrim.pauseRecordingTooltip', "Pause recording"),
+			kind: paused ? undefined : 'error' as const,
+			command: paused ? CODE_SCRIM_RESUME_RECORDING_COMMAND_ID : CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID,
 		};
 		if (this.recordingStatus.value) {
 			this.recordingStatus.value.update(entry);
 		} else {
 			this.recordingStatus.value = this.statusbarService.addEntry(entry, 'status.codescrimRecording', StatusbarAlignment.RIGHT, 100);
 		}
-	}
 
-	private syncReplayDraftStatus(): void {
-		if (!this._lastDraft || this._state.status !== 'idle' || this.replayService.state.status !== 'idle') {
-			this.replayDraftStatus.clear();
-			return;
-		}
-
-		const entry = {
-			name: localize('codeScrim.replayDraftStatusName', "CodeScrim Replay Last Recording"),
-			text: '$(play) ' + localize('codeScrim.replayDraftStatusText', "Replay · {0} events", this._lastDraft.events.length),
-			ariaLabel: localize('codeScrim.replayDraftStatusAriaLabel', "Replay the last CodeScrim recording with {0} events", this._lastDraft.events.length),
-			tooltip: localize('codeScrim.replayDraftStatusTooltip', "Replay the last CodeScrim recording"),
-			command: CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID,
+		const stopEntry = {
+			name: localize('codeScrim.stopRecordingStatusName', "CodeScrim Stop Recording"),
+			text: '$(debug-stop) ' + localize('codeScrim.stopRecordingStatusText', "Stop"),
+			ariaLabel: localize('codeScrim.stopRecordingStatusAriaLabel', "Stop and keep the CodeScrim recording"),
+			tooltip: localize('codeScrim.stopRecordingTooltip', "Stop and keep recording"),
+			command: CODE_SCRIM_STOP_RECORDING_COMMAND_ID,
 		};
-		if (this.replayDraftStatus.value) {
-			this.replayDraftStatus.value.update(entry);
+		if (this.stopRecordingStatus.value) {
+			this.stopRecordingStatus.value.update(stopEntry);
 		} else {
-			this.replayDraftStatus.value = this.statusbarService.addEntry(entry, 'status.codescrimReplayDraft', StatusbarAlignment.RIGHT, 99);
+			this.stopRecordingStatus.value = this.statusbarService.addEntry(stopEntry, 'status.codescrimStopRecording', StatusbarAlignment.RIGHT, 99);
 		}
 	}
 
