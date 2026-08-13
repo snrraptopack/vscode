@@ -14,6 +14,8 @@ import { DisposableStore, IDisposable, MutableDisposable } from '../../../../bas
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { CodeEditorWidget } from '../../../../editor/browser/widget/codeEditor/codeEditorWidget.js';
+import { Selection } from '../../../../editor/common/core/selection.js';
+import { ScrollType } from '../../../../editor/common/editorCommon.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { getIconClasses } from '../../../../editor/common/services/getIconClasses.js';
@@ -30,7 +32,7 @@ import { IThemeService } from '../../../../platform/theme/common/themeService.js
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { IEditorOpenContext } from '../../../common/editor.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
-import { CodeScrimRecordingBuffer, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
+import { CodeScrimRecordingBuffer, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimReplayState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
 import { CodeScrimLessonEditorInput } from './codeScrimLessonEditorInput.js';
@@ -172,6 +174,20 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}
 		this.renderReplayTabs(resource);
 		this.renderWorkspaceTree(resource);
+	}
+
+	applySelections(resource: ICodeScrimWorkspaceResource, selections: readonly ICodeScrimSelection[]): void {
+		if (!selections.length || this.codeEditor?.getModel() !== this.replayService.getLearnerModel(resource)) {
+			return;
+		}
+		const editorSelections = selections.map(selection => new Selection(
+			selection.selectionStartLineNumber,
+			selection.selectionStartColumn,
+			selection.positionLineNumber,
+			selection.positionColumn,
+		));
+		this.codeEditor.setSelections(editorSelections);
+		this.codeEditor.revealPositionInCenterIfOutsideViewport(editorSelections[0].getPosition(), ScrollType.Immediate);
 	}
 
 	closeResource(resource: ICodeScrimWorkspaceResource): void {

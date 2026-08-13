@@ -7,7 +7,7 @@ import { Event } from '../../../../base/common/event.js';
 import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
+import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
 
 export const CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID = 'codescrim.replayLastRecording';
 export const CODE_SCRIM_RESTART_REPLAY_COMMAND_ID = 'codescrim.restartReplay';
@@ -28,6 +28,7 @@ export type CodeScrimReplayState =
 
 export interface ICodeScrimReplaySurface {
 	openResource(resource: ICodeScrimWorkspaceResource, model: ITextModel): void;
+	applySelections(resource: ICodeScrimWorkspaceResource, selections: readonly ICodeScrimSelection[]): void;
 	closeResource(resource: ICodeScrimWorkspaceResource): void;
 	clear(): void;
 }

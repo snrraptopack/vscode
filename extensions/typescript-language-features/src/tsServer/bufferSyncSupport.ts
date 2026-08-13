@@ -762,7 +762,10 @@ export default class BufferSyncSupport extends Disposable {
 			return false;
 		}
 
-		if (!this.client.configuration.enableProjectDiagnostics && !this._tabResources.has(buffer.resource)) { // Only validate resources that are showing to the user
+		// Native embedded editors are exposed through the standard visible-text-editor
+		// API even though they do not necessarily own a workbench tab.
+		const visible = vscode.window.visibleTextEditors.some(editor => editor.document.uri.toString() === buffer.resource.toString());
+		if (!this.client.configuration.enableProjectDiagnostics && !this._tabResources.has(buffer.resource) && !visible) { // Only validate resources that are showing to the user
 			return false;
 		}
 

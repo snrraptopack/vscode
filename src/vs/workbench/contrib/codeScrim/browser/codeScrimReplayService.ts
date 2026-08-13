@@ -11,9 +11,7 @@ import { Emitter } from '../../../../base/common/event.js';
 import { Disposable, DisposableMap, IDisposable, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { URI } from '../../../../base/common/uri.js';
-import { ICodeEditorService } from '../../../../editor/browser/services/codeEditorService.js';
 import { Range } from '../../../../editor/common/core/range.js';
-import { Selection } from '../../../../editor/common/core/selection.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
 import { EndOfLineSequence, ITextModel } from '../../../../editor/common/model.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
@@ -81,7 +79,6 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	}
 
 	constructor(
-		@ICodeEditorService private readonly codeEditorService: ICodeEditorService,
 		@IEditorService private readonly editorService: IEditorService,
 		@ILanguageService private readonly languageService: ILanguageService,
 		@IModelService private readonly modelService: IModelService,
@@ -452,20 +449,19 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				if (!model || !instructorModel) {
 					break;
 				}
-				if (event.payload.text !== undefined) {
-					instructorModel.setValue(event.payload.text);
-				} else {
-					const edits = event.payload.changes.map(change => ({
-						range: Range.fromPositions(instructorModel.getPositionAt(change.rangeOffset), instructorModel.getPositionAt(change.rangeOffset + change.rangeLength)),
-						text: change.text,
-					}));
-					instructorModel.applyEdits(edits);
-				}
-				instructorModel.setEOL(event.payload.eol === '\r\n' ? EndOfLineSequence.CRLF : EndOfLineSequence.LF);
+				this.applyDocumentChange(instructorModel, event.payload);
 				const instructorText = instructorModel.getValue();
 				const decision = this.learnerOverlays.advanceInstructor(event.payload.resource, instructorText, allowConflict);
 				if (decision === 'apply') {
-					this.syncLearnerModel(model, instructorModel);
+					// Incremental edits let Monaco move the caret and active-line state exactly as
+					// it does during ordinary typing. Guard the mutation so the learner model's
+					// content listener does not mistake replay-owned input for learner editing.
+					this.applyingInstructorText = true;
+					try {
+						this.applyDocumentChange(model, event.payload);
+					} finally {
+						this.applyingInstructorText = false;
+					}
 				} else if (decision === 'conflict') {
 					this.publishLearnerState();
 					return true;
@@ -477,15 +473,10 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				if (!this.isCurrentOperation(operation)) {
 					break;
 				}
-				const editor = this.codeEditorService.getActiveCodeEditor();
-				if (editor?.getModel() === this.getModel(event.payload.resource)) {
-					editor.setSelections(event.payload.selections.map(selection => new Selection(
-						selection.selectionStartLineNumber,
-						selection.selectionStartColumn,
-						selection.positionLineNumber,
-						selection.positionColumn,
-					)));
-				}
+				// The lesson editor is an embedded native editor, so it is not guaranteed to be
+				// returned as the active workbench editor. Route presentation through the
+				// attached replay surface instead of guessing through global editor state.
+				this.surface?.applySelections(event.payload.resource, event.payload.selections);
 				break;
 			}
 			case 'editor.documentSaved':
@@ -493,6 +484,25 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				break;
 		}
 		return false;
+	}
+
+	private applyDocumentChange(model: ITextModel, payload: Extract<CodeScrimRecordingEvent, { readonly kind: 'editor.documentChanged' }>['payload']): void {
+		if (payload.changes.length) {
+			try {
+				model.applyEdits(payload.changes.map(change => ({
+					range: Range.fromPositions(model.getPositionAt(change.rangeOffset), model.getPositionAt(change.rangeOffset + change.rangeLength)),
+					text: change.text,
+				})));
+			} catch (error) {
+				if (payload.text === undefined) {
+					throw error;
+				}
+			}
+		}
+		if (payload.text !== undefined && model.getValue() !== payload.text) {
+			model.setValue(payload.text);
+		}
+		model.setEOL(payload.eol === '\r\n' ? EndOfLineSequence.CRLF : EndOfLineSequence.LF);
 	}
 
 	private async activateReplayResource(resource: ICodeScrimWorkspaceResource, operation: number): Promise<void> {
@@ -730,8 +740,8 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 	private toReplayUri(draftId: string, resource: ICodeScrimWorkspaceResource): URI {
 		return URI.from({
-			// Untitled models participate in the normal extension-host language feature pipeline
-			// while remaining replay-owned and disconnected from the host filesystem.
+			// Untitled is VS Code's generic editable-document contract. It gives every
+			// installed language provider its normal opt-in path without writing to disk.
 			scheme: Schemas.untitled,
 			authority: draftId,
 			path: `/codescrim/${resource.root}/${resource.path}`,

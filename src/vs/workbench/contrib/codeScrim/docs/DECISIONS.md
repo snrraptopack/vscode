@@ -82,7 +82,7 @@ Reason: authoring should retain standard VS Code behavior, and portable session 
 
 Status: accepted.
 
-The first replay implementation creates real Monaco models from the immutable recording checkpoint. The private instructor model uses a CodeScrim-owned URI, while the editable learner model uses an isolated `untitled:` URI so it participates in VS Code's normal language-feature pipeline without representing or writing a host file. Recorded editor events target the instructor model and are projected into the learner model when the learner has not taken control. Recorded save events are passive timeline markers rather than file writes.
+The first replay implementation creates real Monaco models from the immutable recording checkpoint. The private instructor model uses a CodeScrim-owned URI, while the editable learner model uses an isolated `untitled:` URI so every installed language provider can use VS Code's normal editable-document path without representing or writing a host file. Recorded editor events target the instructor model and are projected into the learner model when the learner has not taken control. Recorded save events are passive timeline markers rather than file writes.
 
 Reason: the vertical slice must prove native, deterministic code playback without risking the creator's source files. The learner receives a real editable editor with language-aware features, while instructor state remains immutable and execution stays behind an explicit sandbox policy.
 
