@@ -218,9 +218,11 @@ export interface ICodeScrimReplayService {
 	readonly activeResource: ICodeScrimWorkspaceResource | undefined;
 	readonly learnerState: ICodeScrimLearnerState;
 	readonly learnerExperiments: readonly ICodeScrimLearnerExperiment[];
+	readonly activeLearnerExperimentId: string | undefined;
 	readonly onDidChangeState: Event<CodeScrimReplayState>;
 	readonly onDidChangeWorkspace: Event<void>;
 	readonly onDidChangeLearnerState: Event<ICodeScrimLearnerState>;
+	readonly onDidChangeLearnerExperiments: Event<readonly ICodeScrimLearnerExperiment[]>;
 
 	replay(draft: ICodeScrimRecordingDraft): Promise<boolean>;
 	restart(): Promise<boolean>;
@@ -230,6 +232,7 @@ export interface ICodeScrimReplayService {
 	resume(): void;
 	stop(): void;
 	openResource(resource: ICodeScrimWorkspaceResource): Promise<void>;
+	openLearnerExperiment(id: string): Promise<void>;
 	getLearnerModel(resource: ICodeScrimWorkspaceResource): ITextModel | null;
 	getInstructorModel(resource: ICodeScrimWorkspaceResource): ITextModel | null;
 	hasLearnerChanges(resource: ICodeScrimWorkspaceResource): boolean;

@@ -65,6 +65,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private status: HTMLElement | undefined;
 	private time: HTMLElement | undefined;
 	private progress: HTMLInputElement | undefined;
+	private timelineMarkers: HTMLElement | undefined;
 	private playPauseButton: Button | undefined;
 	private transcriptTab: HTMLButtonElement | undefined;
 	private notesTab: HTMLButtonElement | undefined;
@@ -73,6 +74,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private readonly transcriptEntries: ITranscriptEntry[] = [];
 	private readonly workspaceTreeListeners = this._register(new DisposableStore());
 	private readonly replayTabListeners = this._register(new DisposableStore());
+	private readonly timelineMarkerListeners = this._register(new DisposableStore());
 	private readonly openedResources: ICodeScrimWorkspaceResource[] = [];
 	private readonly layoutLease = this._register(new MutableDisposable<IDisposable>());
 	private readonly replaySurfaceLease = this._register(new MutableDisposable<IDisposable>());
@@ -103,6 +105,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			this.renderReplayTabs();
 			this.renderWorkspaceTree();
 		}));
+		this._register(this.replayService.onDidChangeLearnerExperiments(() => this.renderLearnerExperimentMarkers()));
 	}
 
 	protected override createEditor(parent: HTMLElement): void {
@@ -375,7 +378,8 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		const timelineMeta = DOM.append(timeline, DOM.$('.codescrim-session-timeline-meta'));
 		this.status = DOM.append(timelineMeta, DOM.$('.codescrim-session-status', { 'aria-live': 'polite' }));
 		this.time = DOM.append(timelineMeta, DOM.$('output.codescrim-session-time'));
-		this.progress = DOM.append(timeline, DOM.$('input.codescrim-session-progress', {
+		const timelineTrack = DOM.append(timeline, DOM.$('.codescrim-session-timeline-track'));
+		this.progress = DOM.append(timelineTrack, DOM.$('input.codescrim-session-progress', {
 			type: 'range',
 			min: '0',
 			max: '1',
@@ -383,6 +387,9 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			value: '0',
 			'aria-label': localize('codeScrim.lessonTimelineAriaLabel', "Lesson timeline"),
 		})) as HTMLInputElement;
+		this.timelineMarkers = DOM.append(timelineTrack, DOM.$('.codescrim-session-timeline-markers', {
+			'aria-label': localize('codeScrim.learnerExperimentMarkers', "Learner experiment markers"),
+		}));
 		this._register(DOM.addDisposableListener(this.progress, DOM.EventType.POINTER_DOWN, () => this.beginTimelineScrub()));
 		this._register(DOM.addDisposableListener(this.progress, DOM.EventType.INPUT, () => {
 			const position = Number(this.progress?.value ?? 0);
@@ -403,6 +410,35 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}));
 
 		DOM.append(transport, DOM.$('.codescrim-session-speed', undefined, localize('codeScrim.playbackSpeed', "1×")));
+	}
+
+	private renderLearnerExperimentMarkers(): void {
+		if (!this.timelineMarkers) {
+			return;
+		}
+		DOM.clearNode(this.timelineMarkers);
+		this.timelineMarkerListeners.clear();
+		const state = this.replayService.state;
+		const duration = state.status === 'idle' ? 0 : state.duration;
+		if (!duration) {
+			return;
+		}
+		for (const experiment of this.replayService.learnerExperiments) {
+			const time = this.formatTime(experiment.position / 1000);
+			const label = localize('codeScrim.learnerExperimentMarkerLabel', "Learner experiment at {0}; {1} changed files", time, experiment.changes.length);
+			const marker = DOM.append(this.timelineMarkers, DOM.$('button.codescrim-session-timeline-marker', {
+				type: 'button',
+				title: label,
+				'aria-label': label,
+			})) as HTMLButtonElement;
+			marker.style.left = `${Math.min(100, Math.max(0, experiment.position / duration * 100))}%`;
+			marker.classList.toggle('active', this.replayService.activeLearnerExperimentId === experiment.id);
+			this.timelineMarkerListeners.add(DOM.addDisposableListener(marker, DOM.EventType.CLICK, event => {
+				event.preventDefault();
+				event.stopPropagation();
+				void this.replayService.openLearnerExperiment(experiment.id);
+			}));
+		}
 	}
 
 

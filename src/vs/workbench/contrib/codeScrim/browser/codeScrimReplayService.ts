@@ -47,6 +47,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	private surface: ICodeScrimReplaySurface | undefined;
 	private _activeResource: ICodeScrimWorkspaceResource | undefined;
 	private _learnerExperiments: readonly ICodeScrimLearnerExperiment[] = [];
+	private _activeLearnerExperimentId: string | undefined;
 	private learnerExperimentSequence = 0;
 	private replayActiveResource: ICodeScrimWorkspaceResource | undefined;
 	private pendingActiveResource: ICodeScrimWorkspaceResource | undefined;
@@ -56,6 +57,8 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	readonly onDidChangeWorkspace = this._onDidChangeWorkspace.event;
 	private readonly _onDidChangeLearnerState = this._register(new Emitter<ICodeScrimLearnerState>());
 	readonly onDidChangeLearnerState = this._onDidChangeLearnerState.event;
+	private readonly _onDidChangeLearnerExperiments = this._register(new Emitter<readonly ICodeScrimLearnerExperiment[]>());
+	readonly onDidChangeLearnerExperiments = this._onDidChangeLearnerExperiments.event;
 	private applyingInstructorText = false;
 
 	get state(): CodeScrimReplayState {
@@ -76,6 +79,10 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 	get learnerExperiments(): readonly ICodeScrimLearnerExperiment[] {
 		return this._learnerExperiments;
+	}
+
+	get activeLearnerExperimentId(): string | undefined {
+		return this._activeLearnerExperimentId;
 	}
 
 	constructor(
@@ -188,6 +195,16 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		});
 	}
 
+	async openLearnerExperiment(id: string): Promise<void> {
+		const experiment = this._learnerExperiments.find(candidate => candidate.id === id);
+		if (!experiment) {
+			return;
+		}
+		const operation = ++this.operationVersion;
+		this.timer.clear();
+		await this.operations.queue(() => this.doOpenLearnerExperiment(experiment, operation));
+	}
+
 	attachSurface(surface: ICodeScrimReplaySurface): IDisposable {
 		this.surface = surface;
 		const activeResource = this._activeResource;
@@ -210,8 +227,10 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		try {
 			this.learnerOverlays.clear();
 			this._learnerExperiments = [];
+			this._activeLearnerExperimentId = undefined;
 			this.learnerExperimentSequence = 0;
 			this.publishLearnerState();
+			this.publishLearnerExperiments();
 			await this.closeReplayEditors();
 			if (!this.isCurrentOperation(operation)) {
 				return false;
@@ -317,6 +336,71 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		if (this._state.status === 'playing' && this.isCurrentOperation(operation)) {
 			this.timer.clear();
 			this.publish('paused', this._state.position);
+		}
+	}
+
+	private async doOpenLearnerExperiment(experiment: ICodeScrimLearnerExperiment, operation: number): Promise<void> {
+		const draft = this.activeDraft;
+		if (!draft || !this.isCurrentOperation(operation)) {
+			return;
+		}
+
+		this.captureLearnerExperiment();
+		const target = Math.min(draft.duration, Math.max(0, experiment.position));
+		this.publish('preparing', target);
+		try {
+			await this.closeReplayEditors();
+			if (!this.isCurrentOperation(operation)) {
+				return;
+			}
+			this.surface?.clear();
+			this.models.clearAndDisposeAll();
+			this.instructorModels.clearAndDisposeAll();
+			this.learnerModelListeners.clearAndDisposeAll();
+			this.learnerOverlays.clear();
+			this.prepareWorkspace(draft);
+			this.cursor.reset(draft.events);
+			const initialResource = this.getInitialResource(draft);
+			if (initialResource) {
+				await this.activateReplayResource(initialResource, operation);
+			}
+			for (const event of this.cursor.advance(target)) {
+				if (!this.isCurrentOperation(operation)) {
+					return;
+				}
+				await this.applyEvent(event, operation, false);
+			}
+
+			for (const change of experiment.changes) {
+				const learner = this.ensureModel(change.resource);
+				const instructor = this.getInstructorModelInternal(change.resource);
+				if (!learner || !instructor) {
+					continue;
+				}
+				this.applyingInstructorText = true;
+				try {
+					learner.setValue(change.learnerText);
+				} finally {
+					this.applyingInstructorText = false;
+				}
+				this.learnerOverlays.record(change.resource, change.learnerText, instructor.getValue());
+			}
+			this._activeLearnerExperimentId = experiment.id;
+			this.publishLearnerState();
+			this.publishLearnerExperiments();
+			const firstChange = experiment.changes[0];
+			if (firstChange) {
+				await this.showResource(firstChange.resource, operation);
+			}
+			if (!this.isCurrentOperation(operation)) {
+				return;
+			}
+			this.startedAt = this.now() - target / 1000;
+			this.publish('paused', target);
+		} catch (error) {
+			if (this.isCurrentOperation(operation)) {
+				this.handleReplayError(error);
+			}
 		}
 	}
 
@@ -597,6 +681,10 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this._onDidChangeLearnerState.fire(this.learnerOverlays.state);
 	}
 
+	private publishLearnerExperiments(): void {
+		this._onDidChangeLearnerExperiments.fire(this._learnerExperiments);
+	}
+
 	private captureLearnerExperiment(): void {
 		if (!this.activeDraft) {
 			return;
@@ -611,15 +699,27 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			}] : [];
 		});
 		if (!changes.length) {
+			this._activeLearnerExperimentId = undefined;
 			return;
 		}
+		const activeExperiment = this._activeLearnerExperimentId
+			? this._learnerExperiments.find(experiment => experiment.id === this._activeLearnerExperimentId)
+			: undefined;
+		const unchangedLoadedExperiment = activeExperiment
+			&& activeExperiment.changes.length === changes.length
+			&& activeExperiment.changes.every(change => changes.some(candidate =>
+				CodeScrimRecordingBuffer.resourceKey(candidate.resource) === CodeScrimRecordingBuffer.resourceKey(change.resource)
+				&& candidate.learnerText === change.learnerText));
 
-		const experiment: ICodeScrimLearnerExperiment = Object.freeze({
-			id: `${this.activeDraft.id}:experiment:${++this.learnerExperimentSequence}`,
-			position: this._state.status === 'idle' ? 0 : this._state.position,
-			changes: Object.freeze(changes),
-		});
-		this._learnerExperiments = Object.freeze([...this._learnerExperiments, experiment]);
+		if (!unchangedLoadedExperiment) {
+			const experiment: ICodeScrimLearnerExperiment = Object.freeze({
+				id: `${this.activeDraft.id}:experiment:${++this.learnerExperimentSequence}`,
+				position: this._state.status === 'idle' ? 0 : this._state.position,
+				changes: Object.freeze(changes),
+			});
+			this._learnerExperiments = Object.freeze([...this._learnerExperiments, experiment]);
+		}
+		this._activeLearnerExperimentId = undefined;
 		for (const change of changes) {
 			const learner = this.getModel(change.resource);
 			const instructor = this.getInstructorModelInternal(change.resource);
@@ -629,6 +729,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		}
 		this.learnerOverlays.clear();
 		this.publishLearnerState();
+		this.publishLearnerExperiments();
 	}
 
 	private reconcileLearnerOverlays(): void {
