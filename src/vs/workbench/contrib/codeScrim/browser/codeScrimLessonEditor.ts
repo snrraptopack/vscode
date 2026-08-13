@@ -14,6 +14,7 @@ import { DisposableStore, IDisposable, MutableDisposable } from '../../../../bas
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { CodeEditorWidget } from '../../../../editor/browser/widget/codeEditor/codeEditorWidget.js';
+import { DiffEditorWidget } from '../../../../editor/browser/widget/diffEditor/diffEditorWidget.js';
 import { Selection } from '../../../../editor/common/core/selection.js';
 import { ScrollType } from '../../../../editor/common/editorCommon.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
@@ -22,6 +23,7 @@ import { getIconClasses } from '../../../../editor/common/services/getIconClasse
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { IEditorOptions } from '../../../../platform/editor/common/editor.js';
 import { FileKind } from '../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
@@ -33,7 +35,7 @@ import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { IEditorOpenContext } from '../../../common/editor.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
 import { CodeScrimRecordingBuffer, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
-import { CodeScrimReplayState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
+import { CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
 import { CodeScrimLessonEditorInput } from './codeScrimLessonEditorInput.js';
 
@@ -60,12 +62,15 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private replayTabs: HTMLElement | undefined;
 	private editorHost: HTMLElement | undefined;
 	private codeEditor: CodeEditorWidget | undefined;
+	private diffEditorHost: HTMLElement | undefined;
+	private diffEditor: DiffEditorWidget | undefined;
 	private navigationRevealButton: HTMLButtonElement | undefined;
 	private contextRevealButton: HTMLButtonElement | undefined;
 	private status: HTMLElement | undefined;
 	private time: HTMLElement | undefined;
 	private progress: HTMLInputElement | undefined;
 	private timelineMarkers: HTMLElement | undefined;
+	private experimentPopover: HTMLElement | undefined;
 	private playPauseButton: Button | undefined;
 	private transcriptTab: HTMLButtonElement | undefined;
 	private notesTab: HTMLButtonElement | undefined;
@@ -75,6 +80,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private readonly workspaceTreeListeners = this._register(new DisposableStore());
 	private readonly replayTabListeners = this._register(new DisposableStore());
 	private readonly timelineMarkerListeners = this._register(new DisposableStore());
+	private readonly experimentPopoverListeners = this._register(new DisposableStore());
 	private readonly openedResources: ICodeScrimWorkspaceResource[] = [];
 	private readonly layoutLease = this._register(new MutableDisposable<IDisposable>());
 	private readonly replaySurfaceLease = this._register(new MutableDisposable<IDisposable>());
@@ -83,6 +89,8 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private timelineScrubbing = false;
 	private resumeAfterTimelineScrub = false;
 	private timelinePause: Promise<void> | undefined;
+	private selectedExperimentId: string | undefined;
+	private reviewingExperimentId: string | undefined;
 
 	constructor(
 		group: IEditorGroup,
@@ -90,6 +98,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		@IThemeService themeService: IThemeService,
 		@IStorageService storageService: IStorageService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ILanguageService private readonly languageService: ILanguageService,
 		@ICodeScrimLayoutService private readonly layoutService: ICodeScrimLayoutService,
@@ -105,7 +114,13 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			this.renderReplayTabs();
 			this.renderWorkspaceTree();
 		}));
-		this._register(this.replayService.onDidChangeLearnerExperiments(() => this.renderLearnerExperimentMarkers()));
+		this._register(this.replayService.onDidChangeLearnerExperiments(() => {
+			if (this.selectedExperimentId && this.replayService.activeLearnerExperimentId !== this.selectedExperimentId) {
+				this.dismissExperimentPopover();
+			}
+			this.renderLearnerExperimentMarkers();
+			this.renderExperimentPopover();
+		}));
 	}
 
 	protected override createEditor(parent: HTMLElement): void {
@@ -198,6 +213,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	}
 
 	clear(): void {
+		this.dismissExperimentPopover();
 		this.codeEditor?.setModel(null);
 		this.openedResources.length = 0;
 		this.root?.classList.remove('has-replay-model');
@@ -320,6 +336,19 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		// tick can overwrite the cursor, selection, or text the learner is manipulating.
 		this._register(this.codeEditor.onMouseDown(() => this.replayService.beginLearnerEdit()));
 		this._register(this.codeEditor.onKeyDown(() => this.replayService.beginLearnerEdit()));
+		const diffEditorHost = this.diffEditorHost = DOM.append(content, DOM.$('.codescrim-session-diff-editor'));
+		diffEditorHost.hidden = true;
+		this.diffEditor = this._register(this.instantiationService.createInstance(DiffEditorWidget, diffEditorHost, {
+			readOnly: true,
+			originalEditable: false,
+			automaticLayout: false,
+			scrollBeyondLastLine: false,
+			renderSideBySideInlineBreakpoint: 520,
+			useInlineViewWhenSpaceIsLimited: true,
+			diffAlgorithm: 'advanced',
+			originalAriaLabel: localize('codeScrim.instructorVersion', "Instructor version"),
+			modifiedAriaLabel: localize('codeScrim.learnerVersion', "Learner version"),
+		}, {}));
 		const playButton = DOM.append(content, DOM.$('button.codescrim-session-stage-play', {
 			type: 'button',
 			'aria-label': localize('codeScrim.playLessonFromStage', "Play lesson"),
@@ -375,6 +404,8 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}));
 
 		const timeline = DOM.append(transport, DOM.$('.codescrim-session-timeline'));
+		this.experimentPopover = DOM.append(timeline, DOM.$('.codescrim-session-experiment-popover'));
+		this.experimentPopover.hidden = true;
 		const timelineMeta = DOM.append(timeline, DOM.$('.codescrim-session-timeline-meta'));
 		this.status = DOM.append(timelineMeta, DOM.$('.codescrim-session-status', { 'aria-live': 'polite' }));
 		this.time = DOM.append(timelineMeta, DOM.$('output.codescrim-session-time'));
@@ -436,9 +467,145 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			this.timelineMarkerListeners.add(DOM.addDisposableListener(marker, DOM.EventType.CLICK, event => {
 				event.preventDefault();
 				event.stopPropagation();
-				void this.replayService.openLearnerExperiment(experiment.id);
+				void this.selectLearnerExperiment(experiment.id);
 			}));
 		}
+	}
+
+	private async selectLearnerExperiment(id: string): Promise<void> {
+		this.closeExperimentReview();
+		await this.replayService.openLearnerExperiment(id);
+		if (this.replayService.activeLearnerExperimentId !== id) {
+			return;
+		}
+		this.selectedExperimentId = id;
+		this.renderLearnerExperimentMarkers();
+		this.renderExperimentPopover();
+	}
+
+	private renderExperimentPopover(): void {
+		if (!this.experimentPopover) {
+			return;
+		}
+
+		DOM.clearNode(this.experimentPopover);
+		this.experimentPopoverListeners.clear();
+		const experiment = this.selectedExperimentId
+			? this.replayService.learnerExperiments.find(candidate => candidate.id === this.selectedExperimentId)
+			: undefined;
+		this.experimentPopover.hidden = !experiment;
+		if (!experiment) {
+			return;
+		}
+
+		const summary = experiment.changes.length === 1
+			? localize('codeScrim.experimentSummaryOneFile', "Experiment · {0} · 1 file", this.formatTime(experiment.position / 1000))
+			: localize('codeScrim.experimentSummaryManyFiles', "Experiment · {0} · {1} files", this.formatTime(experiment.position / 1000), experiment.changes.length);
+		const label = DOM.append(this.experimentPopover, DOM.$('.codescrim-session-experiment-summary'));
+		label.appendChild(renderIcon(Codicon.gitBranch));
+		DOM.append(label, DOM.$('span', undefined, summary));
+
+		const reviewButton = DOM.append(this.experimentPopover, DOM.$('button.codescrim-session-experiment-review', {
+			type: 'button',
+		}, this.reviewingExperimentId === experiment.id
+			? localize('codeScrim.closeExperimentReview', "Close Review")
+			: localize('codeScrim.reviewExperimentChanges', "Review Changes"))) as HTMLButtonElement;
+		this.experimentPopoverListeners.add(DOM.addDisposableListener(reviewButton, DOM.EventType.CLICK, () => {
+			if (this.reviewingExperimentId === experiment.id) {
+				this.closeExperimentReview();
+			} else {
+				this.openExperimentReview(experiment);
+			}
+			this.renderExperimentPopover();
+		}));
+
+		const moreButton = DOM.append(this.experimentPopover, DOM.$('button.codescrim-session-experiment-more', {
+			type: 'button',
+			title: localize('codeScrim.moreExperimentActions', "More experiment actions"),
+			'aria-label': localize('codeScrim.moreExperimentActions', "More experiment actions"),
+		})) as HTMLButtonElement;
+		moreButton.appendChild(renderIcon(Codicon.more));
+		this.experimentPopoverListeners.add(DOM.addDisposableListener(moreButton, DOM.EventType.CLICK, event => {
+			event.stopPropagation();
+			this.showExperimentMenu(moreButton, experiment);
+		}));
+
+		const closeButton = DOM.append(this.experimentPopover, DOM.$('button.codescrim-session-experiment-close', {
+			type: 'button',
+			title: localize('codeScrim.closeExperimentActions', "Close experiment actions"),
+			'aria-label': localize('codeScrim.closeExperimentActions', "Close experiment actions"),
+		})) as HTMLButtonElement;
+		closeButton.appendChild(renderIcon(Codicon.close));
+		this.experimentPopoverListeners.add(DOM.addDisposableListener(closeButton, DOM.EventType.CLICK, () => this.dismissExperimentPopover()));
+	}
+
+	private showExperimentMenu(anchor: HTMLElement, experiment: ICodeScrimLearnerExperiment): void {
+		this.contextMenuService.showContextMenu({
+			getAnchor: () => anchor,
+			getActions: () => [{
+				id: 'codescrim.restoreInstructorExperiment',
+				label: localize('codeScrim.restoreInstructorExperiment', "Restore Instructor Version"),
+				enabled: true,
+				run: () => {
+					this.closeExperimentReview();
+					this.replayService.restoreLearnerExperiment(experiment.id);
+				},
+			}, {
+				id: 'codescrim.keepLearnerExperiment',
+				label: localize('codeScrim.keepLearnerExperiment', "Keep Learner Version"),
+				enabled: true,
+				run: () => this.dismissExperimentPopover(),
+			}, {
+				id: 'codescrim.deleteLearnerExperiment',
+				label: localize('codeScrim.deleteLearnerExperiment', "Delete Experiment"),
+				enabled: true,
+				run: () => {
+					this.dismissExperimentPopover();
+					this.replayService.deleteLearnerExperiment(experiment.id);
+				},
+			}],
+		});
+	}
+
+	private openExperimentReview(experiment: ICodeScrimLearnerExperiment, resource = experiment.changes[0]?.resource): void {
+		if (!resource || !this.diffEditor || !this.editorHost || !this.diffEditorHost) {
+			return;
+		}
+		const instructor = this.replayService.getInstructorModel(resource);
+		const learner = this.replayService.getLearnerModel(resource);
+		if (!instructor || !learner) {
+			return;
+		}
+		this.reviewingExperimentId = experiment.id;
+		this.editorHost.hidden = true;
+		this.diffEditorHost.hidden = false;
+		this.diffEditor.setModel({ original: instructor, modified: learner });
+		this.renderReplayTabs(resource);
+		this.renderWorkspaceTree(resource);
+		mainWindow.requestAnimationFrame(() => this.layoutCodeEditor());
+	}
+
+	private closeExperimentReview(): void {
+		this.reviewingExperimentId = undefined;
+		this.diffEditor?.setModel(null);
+		if (this.diffEditorHost) {
+			this.diffEditorHost.hidden = true;
+		}
+		if (this.editorHost) {
+			this.editorHost.hidden = false;
+		}
+		this.renderReplayTabs();
+		this.renderWorkspaceTree();
+		mainWindow.requestAnimationFrame(() => this.layoutCodeEditor());
+	}
+
+	private dismissExperimentPopover(closeReview = true): void {
+		this.selectedExperimentId = undefined;
+		if (closeReview) {
+			this.closeExperimentReview();
+		}
+		this.renderLearnerExperimentMarkers();
+		this.renderExperimentPopover();
 	}
 
 
@@ -603,7 +770,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			const openButton = DOM.append(tab, DOM.$('button.codescrim-session-replay-tab-open', { type: 'button' })) as HTMLButtonElement;
 			this.appendResourceIcon(openButton, resource, 'file');
 			DOM.append(openButton, DOM.$('span', undefined, resource.path.split('/').pop() ?? resource.path));
-			this.replayTabListeners.add(DOM.addDisposableListener(openButton, DOM.EventType.CLICK, () => void this.replayService.openResource(resource)));
+			this.replayTabListeners.add(DOM.addDisposableListener(openButton, DOM.EventType.CLICK, () => this.openWorkspaceResource(resource)));
 			const closeButton = DOM.append(tab, DOM.$('button.codescrim-session-replay-tab-close', {
 				type: 'button',
 				title: localize('codeScrim.closeReplayFile', "Close replay file"),
@@ -651,8 +818,19 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		if (entry.type === 'directory' || !entry.text) {
 			item.disabled = true;
 		} else {
-			this.workspaceTreeListeners.add(DOM.addDisposableListener(item, DOM.EventType.CLICK, () => void this.replayService.openResource(entry.resource)));
+			this.workspaceTreeListeners.add(DOM.addDisposableListener(item, DOM.EventType.CLICK, () => this.openWorkspaceResource(entry.resource)));
 		}
+	}
+
+	private openWorkspaceResource(resource: ICodeScrimWorkspaceResource): void {
+		const experiment = this.reviewingExperimentId
+			? this.replayService.learnerExperiments.find(candidate => candidate.id === this.reviewingExperimentId)
+			: undefined;
+		if (experiment?.changes.some(change => CodeScrimRecordingBuffer.resourceKey(change.resource) === CodeScrimRecordingBuffer.resourceKey(resource))) {
+			this.openExperimentReview(experiment, resource);
+			return;
+		}
+		void this.replayService.openResource(resource);
 	}
 
 	private appendResourceIcon(parent: HTMLElement, resource: ICodeScrimWorkspaceResource, type: 'file' | 'directory'): void {
@@ -695,6 +873,9 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private layoutCodeEditor(): void {
 		if (this.editorHost && this.codeEditor) {
 			this.codeEditor.layout(new DOM.Dimension(this.editorHost.clientWidth, this.editorHost.clientHeight));
+		}
+		if (this.diffEditorHost && this.diffEditor && !this.diffEditorHost.hidden) {
+			this.diffEditor.layout(new DOM.Dimension(this.diffEditorHost.clientWidth, this.diffEditorHost.clientHeight));
 		}
 	}
 

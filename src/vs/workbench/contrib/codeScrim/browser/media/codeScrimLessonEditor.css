@@ -408,7 +408,8 @@
 	background: var(--vscode-editor-background);
 }
 
-.codescrim-session-code-editor {
+.codescrim-session-code-editor,
+.codescrim-session-diff-editor {
 	position: absolute;
 	top: 35px;
 	right: 0;
@@ -416,11 +417,13 @@
 	left: 0;
 }
 
-.codescrim-session-replay-tabs[hidden] ~ .codescrim-session-code-editor {
+.codescrim-session-replay-tabs[hidden] ~ .codescrim-session-code-editor,
+.codescrim-session-replay-tabs[hidden] ~ .codescrim-session-diff-editor {
 	top: 0;
 }
 
-.codescrim-session-code-editor[hidden] {
+.codescrim-session-code-editor[hidden],
+.codescrim-session-diff-editor[hidden] {
 	display: none;
 }
 
@@ -564,7 +567,85 @@
 }
 
 .codescrim-session-timeline {
+	position: relative;
 	min-width: 0;
+}
+
+.codescrim-session-experiment-popover {
+	position: absolute;
+	right: 0;
+	bottom: 42px;
+	z-index: 8;
+	display: flex;
+	box-sizing: border-box;
+	min-width: 360px;
+	max-width: min(520px, 80vw);
+	height: 46px;
+	padding: 6px;
+	align-items: center;
+	gap: 6px;
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: var(--vscode-editorWidget-background);
+	box-shadow: 0 4px 16px var(--vscode-widget-shadow);
+}
+
+.codescrim-session-experiment-popover[hidden] {
+	display: none;
+}
+
+.codescrim-session-experiment-summary {
+	display: flex;
+	min-width: 0;
+	padding: 0 8px;
+	align-items: center;
+	flex: 1;
+	gap: 8px;
+	color: var(--vscode-editorWidget-foreground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.codescrim-session-experiment-summary span:last-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.codescrim-session-experiment-review,
+.codescrim-session-experiment-more,
+.codescrim-session-experiment-close {
+	box-sizing: border-box;
+	height: 30px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-editorWidget-foreground);
+	font-family: inherit;
+	cursor: pointer;
+}
+
+.codescrim-session-experiment-review {
+	padding: 0 10px;
+	border: 1px solid var(--vscode-button-secondaryBackground);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
+
+.codescrim-session-experiment-review:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.codescrim-session-experiment-more,
+.codescrim-session-experiment-close {
+	display: grid;
+	width: 30px;
+	padding: 0;
+	place-items: center;
+}
+
+.codescrim-session-experiment-more:hover,
+.codescrim-session-experiment-close:hover {
+	background: var(--vscode-toolbar-hoverBackground);
 }
 
 .codescrim-session-timeline-track {

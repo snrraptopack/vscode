@@ -233,6 +233,8 @@ export interface ICodeScrimReplayService {
 	stop(): void;
 	openResource(resource: ICodeScrimWorkspaceResource): Promise<void>;
 	openLearnerExperiment(id: string): Promise<void>;
+	restoreLearnerExperiment(id: string): boolean;
+	deleteLearnerExperiment(id: string): boolean;
 	getLearnerModel(resource: ICodeScrimWorkspaceResource): ITextModel | null;
 	getInstructorModel(resource: ICodeScrimWorkspaceResource): ITextModel | null;
 	hasLearnerChanges(resource: ICodeScrimWorkspaceResource): boolean;

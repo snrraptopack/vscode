@@ -205,6 +205,43 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		await this.operations.queue(() => this.doOpenLearnerExperiment(experiment, operation));
 	}
 
+	restoreLearnerExperiment(id: string): boolean {
+		if (this._activeLearnerExperimentId !== id) {
+			return false;
+		}
+
+		const experiment = this._learnerExperiments.find(candidate => candidate.id === id);
+		if (!experiment) {
+			return false;
+		}
+
+		for (const change of experiment.changes) {
+			const instructor = this.getInstructorModelInternal(change.resource);
+			const learner = this.getModel(change.resource);
+			if (instructor && learner && this.learnerOverlays.restore(change.resource)) {
+				this.syncLearnerModel(learner, instructor);
+			}
+		}
+		this._activeLearnerExperimentId = undefined;
+		this.publishLearnerState();
+		this.publishLearnerExperiments();
+		return true;
+	}
+
+	deleteLearnerExperiment(id: string): boolean {
+		const experiment = this._learnerExperiments.find(candidate => candidate.id === id);
+		if (!experiment) {
+			return false;
+		}
+
+		if (this._activeLearnerExperimentId === id) {
+			this.restoreLearnerExperiment(id);
+		}
+		this._learnerExperiments = Object.freeze(this._learnerExperiments.filter(candidate => candidate.id !== id));
+		this.publishLearnerExperiments();
+		return true;
+	}
+
 	attachSurface(surface: ICodeScrimReplaySurface): IDisposable {
 		this.surface = surface;
 		const activeResource = this._activeResource;
