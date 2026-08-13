@@ -6,7 +6,7 @@
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { CodeScrimEditorEvent } from '../../common/codeScrimRecording.js';
-import { CodeScrimReplayCursor } from '../../common/codeScrimReplay.js';
+import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor } from '../../common/codeScrimReplay.js';
 
 suite('CodeScrimReplayCursor', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -54,5 +54,60 @@ suite('CodeScrimReplayCursor', () => {
 
 		assert.strictEqual(cursor.appliedEventCount, 0);
 		assert.deepStrictEqual(cursor.advance(0), events);
+	});
+
+	test('releases one event without consuming the rest of a timestamp batch', () => {
+		const cursor = new CodeScrimReplayCursor();
+		const events = [event(0, 100), event(1, 100), event(2, 200)];
+		cursor.reset(events);
+
+		assert.strictEqual(cursor.advanceOne(100), events[0]);
+		assert.strictEqual(cursor.appliedEventCount, 1);
+		assert.strictEqual(cursor.advanceOne(100), events[1]);
+		assert.strictEqual(cursor.advanceOne(100), undefined);
+		assert.strictEqual(cursor.advanceOne(200), events[2]);
+	});
+});
+
+suite('CodeScrimLearnerOverlayStore', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	const resource = { root: 0, path: 'lesson.ts' };
+
+	test('removes an overlay when learner and instructor text match', () => {
+		const overlays = new CodeScrimLearnerOverlayStore();
+		overlays.record(resource, 'const answer = 42;', '');
+		assert.strictEqual(overlays.hasChanges(resource), true);
+
+		overlays.record(resource, 'const answer = 42;', 'const answer = 42;');
+		assert.strictEqual(overlays.hasChanges(resource), false);
+	});
+
+	test('blocks an instructor edit until learner chooses a resolution', () => {
+		const overlays = new CodeScrimLearnerOverlayStore();
+		overlays.record(resource, 'const answer = 43;', 'const answer = 42;');
+
+		assert.strictEqual(overlays.advanceInstructor(resource, 'const answer = 44;', true), 'conflict');
+		assert.deepStrictEqual(overlays.state.conflict?.resource, resource);
+		assert.strictEqual(overlays.keep(resource), true);
+		assert.strictEqual(overlays.state.conflict, undefined);
+		assert.strictEqual(overlays.advanceInstructor(resource, 'const answer = 45;', true), 'keep');
+	});
+
+	test('restores the instructor branch by discarding only learner text', () => {
+		const overlays = new CodeScrimLearnerOverlayStore();
+		overlays.record(resource, 'learner', 'instructor');
+		assert.strictEqual(overlays.restore(resource), true);
+		assert.strictEqual(overlays.hasChanges(resource), false);
+		assert.strictEqual(overlays.advanceInstructor(resource, 'next instructor', true), 'apply');
+	});
+
+	test('preserves an overlay throughout checkpoint reconstruction', () => {
+		const overlays = new CodeScrimLearnerOverlayStore();
+		overlays.record(resource, 'temporary match', 'start');
+
+		assert.strictEqual(overlays.advanceInstructor(resource, 'temporary match', false), 'keep');
+		assert.strictEqual(overlays.advanceInstructor(resource, 'final instructor', false), 'keep');
+		assert.strictEqual(overlays.getText(resource), 'temporary match');
 	});
 });

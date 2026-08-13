@@ -97,6 +97,10 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this._register(this.sessionService.onDidChangeState(state => this.renderState(state)));
 		this._register(this.replayService.onDidChangeState(state => this.renderReplayState(state)));
 		this._register(this.replayService.onDidChangeWorkspace(() => this.renderWorkspaceTree()));
+		this._register(this.replayService.onDidChangeLearnerState(() => {
+			this.renderReplayTabs();
+			this.renderWorkspaceTree();
+		}));
 	}
 
 	protected override createEditor(parent: HTMLElement): void {
@@ -286,13 +290,17 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.replayTabs.hidden = true;
 		const editorHost = this.editorHost = DOM.append(content, DOM.$('.codescrim-session-code-editor'));
 		this.codeEditor = this._register(this.instantiationService.createInstance(CodeEditorWidget, editorHost, {
-			readOnly: true,
-			domReadOnly: true,
+			readOnly: false,
+			domReadOnly: false,
 			automaticLayout: false,
 			minimap: { enabled: true },
 			scrollBeyondLastLine: false,
-			ariaLabel: localize('codeScrim.replayEditorAriaLabel', "Recorded lesson editor"),
+			ariaLabel: localize('codeScrim.replayEditorAriaLabel', "Learner workspace editor"),
 		}, { isSimpleWidget: false }));
+		// Pointer and keyboard intent switch to learner control before another replay
+		// tick can overwrite the cursor, selection, or text the learner is manipulating.
+		this._register(this.codeEditor.onMouseDown(() => this.replayService.beginLearnerEdit()));
+		this._register(this.codeEditor.onKeyDown(() => this.replayService.beginLearnerEdit()));
 		const playButton = DOM.append(content, DOM.$('button.codescrim-session-stage-play', {
 			type: 'button',
 			'aria-label': localize('codeScrim.playLessonFromStage', "Play lesson"),
@@ -380,6 +388,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 
 		DOM.append(transport, DOM.$('.codescrim-session-speed', undefined, localize('codeScrim.playbackSpeed', "1×")));
 	}
+
 
 	private beginTimelineScrub(): void {
 		if (this.timelineScrubbing || this.replayService.state.status === 'idle') {
@@ -489,6 +498,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.navigationMode = mode;
 		this.navigationModeManuallySelected ||= manual;
 		const courseSelected = mode === 'course';
+		this.navigation?.classList.toggle('files-mode', !courseSelected);
 		if (this.coursePane) {
 			this.coursePane.hidden = !courseSelected;
 		}
@@ -537,6 +547,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 				'aria-selected': String(active),
 				title: resource.path,
 			}));
+			tab.classList.toggle('learner-modified', this.replayService.hasLearnerChanges(resource));
 			const openButton = DOM.append(tab, DOM.$('button.codescrim-session-replay-tab-open', { type: 'button' })) as HTMLButtonElement;
 			this.appendResourceIcon(openButton, resource, 'file');
 			DOM.append(openButton, DOM.$('span', undefined, resource.path.split('/').pop() ?? resource.path));
@@ -582,6 +593,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		})) as HTMLButtonElement;
 		item.style.paddingLeft = `${10 + (depth - 1) * 14}px`;
 		item.classList.toggle('active', !!activeResource && CodeScrimRecordingBuffer.resourceKey(activeResource) === CodeScrimRecordingBuffer.resourceKey(entry.resource));
+		item.classList.toggle('learner-modified', entry.type === 'file' && this.replayService.hasLearnerChanges(entry.resource));
 		this.appendResourceIcon(item, entry.resource, entry.type);
 		DOM.append(item, DOM.$('span', undefined, label));
 		if (entry.type === 'directory' || !entry.text) {
@@ -703,12 +715,15 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			return;
 		}
 
+		const ready = state.status === 'paused' && state.position === 0 && state.appliedEventCount === 0;
 		const status = state.status === 'preparing'
 			? localize('codeScrim.lessonReplayPreparing', "Preparing replay")
 			: state.status === 'playing'
 				? localize('codeScrim.lessonReplayPlaying', "Playing instructor session")
 				: state.status === 'paused'
-					? localize('codeScrim.lessonReplayPaused', "Replay paused")
+					? ready
+						? localize('codeScrim.lessonReplayReady', "Ready to play")
+						: localize('codeScrim.lessonReplayPaused', "Replay paused")
 					: state.status === 'ended'
 						? localize('codeScrim.lessonReplayComplete', "Replay complete")
 						: localize('codeScrim.lessonReplayFailed', "Replay failed");
@@ -730,7 +745,11 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 				? localize('codeScrim.lessonPause', "Pause")
 				: state.status === 'ended' || state.status === 'error'
 					? localize('codeScrim.lessonReplay', "Replay")
-					: localize('codeScrim.lessonPlay', "Play");
+					: state.status === 'paused'
+						? ready
+							? localize('codeScrim.lessonPlay', "Play")
+							: localize('codeScrim.lessonContinue', "Continue")
+						: localize('codeScrim.lessonPlay', "Play");
 			this.playPauseButton.label = label;
 			this.playPauseButton.setAriaLabel(label);
 		}

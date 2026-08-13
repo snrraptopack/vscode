@@ -252,8 +252,13 @@
 }
 
 .codescrim-session-navigation-footer {
-	padding: var(--vscode-spacing-size160);
+	box-sizing: border-box;
+	display: flex;
+	height: 72px;
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size160);
+	justify-content: center;
 	border-top: 1px solid var(--vscode-panel-border);
+	flex-direction: column;
 }
 
 .codescrim-session-files-pane {
@@ -334,7 +339,7 @@
 
 .codescrim-session-progress-track {
 	height: 3px;
-	margin: var(--vscode-spacing-size80) 0 var(--vscode-spacing-size160);
+	margin: var(--vscode-spacing-size40) 0 var(--vscode-spacing-size40);
 	overflow: hidden;
 	border-radius: var(--vscode-cornerRadius-small);
 	background: var(--vscode-progressBar-background);
@@ -353,7 +358,7 @@
 	display: grid;
 	overflow: hidden;
 	grid-column: 2;
-	grid-template-rows: minmax(0, 1fr) 86px;
+	grid-template-rows: minmax(0, 1fr) 72px;
 	background: var(--vscode-editor-background);
 }
 
@@ -411,8 +416,12 @@
 	left: 0;
 }
 
-.codescrim-session-replay-tabs[hidden] + .codescrim-session-code-editor {
+.codescrim-session-replay-tabs[hidden] ~ .codescrim-session-code-editor {
 	top: 0;
+}
+
+.codescrim-session-code-editor[hidden] {
+	display: none;
 }
 
 .codescrim-session-replay-tabs {
@@ -451,6 +460,17 @@
 .codescrim-session-replay-tab[aria-selected='true'] {
 	background: var(--vscode-tab-activeBackground);
 	color: var(--vscode-tab-activeForeground);
+}
+
+.codescrim-session-replay-tab.learner-modified .codescrim-session-replay-tab-open::after,
+.codescrim-session-file.learner-modified::after {
+	width: 7px;
+	height: 7px;
+	margin-left: auto;
+	border-radius: 50%;
+	background: var(--vscode-gitDecoration-modifiedResourceForeground);
+	content: '';
+	flex: none;
 }
 
 .codescrim-session-replay-tab-open,
@@ -523,7 +543,9 @@
 
 .codescrim-session-transport {
 	display: grid;
-	padding: 12px var(--vscode-spacing-size200);
+	box-sizing: border-box;
+	height: 72px;
+	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size200);
 	align-items: center;
 	grid-template-columns: auto minmax(160px, 1fr) 34px;
 	gap: 16px;

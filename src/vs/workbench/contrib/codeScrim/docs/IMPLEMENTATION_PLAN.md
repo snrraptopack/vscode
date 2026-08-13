@@ -52,6 +52,7 @@ Status: in progress.
 - [x] Route replay resources and restored selections exclusively through the native learner lesson surface.
 - [x] Add replay, stop, and restart commands with native status feedback.
 - [x] Make Replay enter the learner lesson experience before applying its first event.
+- [x] Load the prepared learner lesson at `0:00` and wait for an explicit Play action.
 - [x] Bind the lesson's native center editor to recording-backed virtual models instead of replacing the lesson surface.
 - [x] Add a recording-backed file tree and native multi-file tabs inside the learner experience.
 - [x] Add arbitrary seek from the starting checkpoint.
@@ -65,13 +66,18 @@ Status: in progress.
 - [x] Add a CodeScrim-owned floating authoring dock without using the Activity Bar view system.
 - [x] Keep automatic recovery outside the source workspace; create visible `.scrim` files only through Save As.
 - [x] Validate package framing, versions, paths, event ordering, payloads, expansion limits, and blob integrity before replay.
-- Add a creator comparison action inside the learner experience.
+- Add learner/instructor comparison to the future timeline-marker inspector.
 - Add publisher signatures and account/course key envelopes for distributable packages.
 - Add indexed intermediate checkpoints so long seeks do not replay from time zero.
 - Capture normalized diagnostic/marker snapshots on the session clock for deterministic squiggles and Problems state.
 - Keep captured instructor diagnostics separate from optional live diagnostics produced by a future learner sandbox.
-- Pause before a learner edit is overwritten.
-- Store learner changes as an overlay.
+- [x] Enter learner edit mode immediately on editing and pause before the instructor timeline advances.
+- [x] Expose learner models to native language features without materializing them in the host workspace.
+- [x] Capture learner changes as an in-memory checkpoint, restore the paused instructor frame, and continue from the same timestamp.
+- Render learner-edit markers on the playback timeline.
+- Make a marker open the learner checkpoint captured at that position.
+- Offer Compare, Restore, and Keep actions from the selected marker inspector rather than interrupting normal playback.
+- Persist named learner checkpoints and local Git-like history after marker semantics are stable.
 
 Acceptance criteria:
 
@@ -80,7 +86,7 @@ Acceptance criteria:
 - Replay writes are not captured as learner events.
 - A short native recording can be replayed without changing its final file contents or event ordering.
 
-Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, arbitrary seek, restart, manual file inspection, and deterministic resume now work for workspace and editor events. The starting tree captures portable file bytes under explicit safety limits; later additions, updates, deletions, active files, selections, and authoritative post-edit text anchors are timeline events. Replay owns isolated Monaco models in the native learner surface, exposes a themed virtual tree and multi-file tabs, does not consult files that the instructor later changes or deletes, and cannot save into the creator workspace. Published key distribution/signatures, indexed intermediate checkpoints, captured diagnostics, learner edits/overlays, and non-editor domains are intentionally not claimed yet.
+Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, arbitrary seek, restart, manual file inspection, deterministic resume, and quiet learner experimentation now work for workspace and editor events. The starting tree captures portable file bytes under explicit safety limits; later additions, updates, deletions, active files, selections, and authoritative post-edit text anchors are timeline events. Replay owns an immutable instructor model plus a separately editable learner model for each materialized file. Editing pauses the instructor clock without adding another banner. Continue captures changed files in an in-memory learner checkpoint, silently restores the exact instructor frame, and resumes from that timestamp. Visible timeline markers and their Compare, Restore, and Keep inspector actions remain the next learner-history slice. Published key distribution/signatures, indexed intermediate checkpoints, captured diagnostics, and non-editor domains are intentionally not claimed yet.
 
 ## Milestone 3: Native browser integration
 
