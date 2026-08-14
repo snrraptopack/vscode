@@ -6,7 +6,7 @@ The CodeScrim package is the portable product asset. It must be deterministic, s
 
 ## Container
 
-The implemented `.scrim` v2 format is an opaque binary envelope:
+The implemented `.scrim` v3 format is an opaque binary envelope:
 
 ```text
 magic bytes: CODESCRM
@@ -17,7 +17,7 @@ encrypted payload: gzip-compressed AES-256-GCM ciphertext
 
 The public header contains only the container version, package ID, key ID, algorithms, nonce, and ciphertext length. Filenames, source code, event data, checkpoint metadata, and later media indexes remain inside authenticated ciphertext. Stable routing fields are supplied as AES-GCM additional authenticated data, so changing them invalidates the package.
 
-Inside the encrypted payload, large and repeated values use SHA-256 content-addressed blobs. The manifest references hashes instead of duplicating workspace bytes, document text, checkpoint content, or event chunks. Events are indexed in chunks of 500 and the manifest requires an ordered instructor checkpoint index. There is intentionally no compatibility path for the pre-release v1 development format.
+Inside the encrypted payload, large and repeated values use SHA-256 content-addressed blobs. The manifest references hashes instead of duplicating workspace bytes, document text, terminal output, checkpoint content, or event chunks. Events are indexed in chunks of 500 and the manifest requires an ordered instructor checkpoint index. There is intentionally no compatibility path for obsolete pre-release development formats.
 
 The local authoring key is generated with Web Crypto and stored separately through VS Code's OS-backed secret storage. It is never embedded in the `.scrim` file or written into the instructor workspace. Published-course key envelopes and publisher signatures remain a later distribution layer.
 
@@ -80,6 +80,8 @@ The first editor schema uses these version-1 event kinds:
 
 The first workspace schema uses `workspace.entriesChanged`. Its payload atomically removes zero or more portable workspace resources and introduces zero or more directory/file entries. File entries carry base64 bytes in the in-memory draft; the package writer will move those bytes into content-addressed blobs.
 
+The first terminal schema records lifecycle, active terminal, raw ANSI output, semantic input, dimensions, title, and exit state. Input is retained for later command markers, but passive replay renders only the PTY output stream so shell echo is not duplicated. Terminal checkpoints store the accumulated presentation stream in content-addressed blobs. Replaying or seeking never creates a shell and never forwards recorded input to the host.
+
 Editor resources are represented by workspace-root index and normalized forward-slash relative path. Text changes preserve the model event's descending range-offset order. The current in-memory draft also stores the authoritative full document text after each edit as an integrity anchor. That prevents a damaged or stale incremental range from corrupting every later replay frame. The package writer will replace this per-edit duplication with content-addressed chunks and periodic text anchors/checkpoints while retaining the same deterministic recovery guarantee.
 
 Editor diagnostics are not part of the first draft schema. A later diagnostic track will capture normalized marker snapshots on the shared session clock so recorded squiggles and Problems state remain deterministic across machines and toolchain versions. Live diagnostics from a learner's editable sandbox will be a separate overlay and will never rewrite the captured instructor track.
@@ -101,7 +103,7 @@ A checkpoint contains enough state to seek without replaying from time zero:
 
 The recording buffer owns authoritative checkpoint state. It creates the timeline-zero checkpoint before the first event, automatic checkpoints after 30 seconds or 1,000 events, a checkpoint when recording is paused, and a final checkpoint when recording stops. Each checkpoint stores the first event index it does not contain, so same-timestamp event batches remain exact. Seeking binary-searches the nearest checkpoint at or before the target and replays only the remaining delta.
 
-Checkpoint document text and workspace bytes use the package's SHA-256 blob table, so unchanged files reuse existing blobs. Document text stays distinct from captured workspace bytes because it may represent unsaved editor state.
+Checkpoint document text, workspace bytes, and terminal presentation use the package's SHA-256 blob table. Document text stays distinct from captured workspace bytes because it may represent unsaved editor state.
 
 ## Learner branches
 
@@ -134,7 +136,7 @@ Passive replay and learner execution are separate capabilities. A replay package
 ## Compatibility
 
 - Readers reject unsupported major versions.
-- Readers migrate older minor versions into the current in-memory model.
+- Pre-release readers reject obsolete development schemas instead of carrying migration shims.
 - Writers emit only the current version.
 - Host-specific data belongs in namespaced optional capability blocks.
-- The v1 prototype JSON format will eventually have a one-way importer; it does not define the v2 architecture.
+- The prototype JSON format may eventually have a one-way importer; it does not define the current architecture.

@@ -5,6 +5,7 @@
 
 import { Event } from '../../../../base/common/event.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { CodeScrimTerminalEventData, CodeScrimTerminalState, ICodeScrimTerminalCheckpoint } from './codeScrimTerminal.js';
 
 export const CODE_SCRIM_START_RECORDING_COMMAND_ID = 'codescrim.startRecording';
 export const CODE_SCRIM_STOP_RECORDING_COMMAND_ID = 'codescrim.stopRecording';
@@ -55,9 +56,11 @@ export interface ICodeScrimRecordingCheckpoint {
 	readonly documents: readonly ICodeScrimDocumentCheckpoint[];
 	readonly entries: readonly ICodeScrimWorkspaceEntryCheckpoint[];
 	readonly skippedEntryCount: number;
+	readonly terminals: readonly ICodeScrimTerminalCheckpoint[];
+	readonly activeTerminalId?: number;
 }
 
-interface ICodeScrimEvent<TDomain extends 'workspace' | 'editor', TKind extends string, TPayload> {
+interface ICodeScrimEvent<TDomain extends 'workspace' | 'editor' | 'terminal', TKind extends string, TPayload> {
 	readonly id: string;
 	readonly version: 1;
 	readonly timestamp: number;
@@ -95,7 +98,13 @@ export type CodeScrimWorkspaceEvent = ICodeScrimEvent<'workspace', 'workspace.en
 	readonly created: readonly ICodeScrimWorkspaceEntryCheckpoint[];
 }>;
 
-export type CodeScrimRecordingEvent = CodeScrimEditorEvent | CodeScrimWorkspaceEvent;
+export type CodeScrimTerminalEvent = CodeScrimTerminalEventData extends infer TEvent
+	? TEvent extends { readonly kind: infer TKind extends string; readonly payload: infer TPayload }
+		? ICodeScrimEvent<'terminal', TKind, TPayload>
+		: never
+	: never;
+
+export type CodeScrimRecordingEvent = CodeScrimEditorEvent | CodeScrimWorkspaceEvent | CodeScrimTerminalEvent;
 
 export type CodeScrimRecordingEventData = CodeScrimRecordingEvent extends infer TEvent
 	? TEvent extends CodeScrimRecordingEvent ? Pick<TEvent, 'domain' | 'kind' | 'payload'> : never
@@ -132,6 +141,7 @@ export class CodeScrimRecordingBuffer {
 	private readonly checkpoints: ICodeScrimRecordingCheckpoint[] = [];
 	private activeResource: ICodeScrimWorkspaceResource | undefined;
 	private selections: readonly ICodeScrimSelection[] | undefined;
+	private readonly terminalState = new CodeScrimTerminalState();
 	private skippedEntries = 0;
 
 	get isRecording(): boolean {
@@ -177,6 +187,7 @@ export class CodeScrimRecordingBuffer {
 		this.checkpoints.length = 0;
 		this.activeResource = undefined;
 		this.selections = undefined;
+		this.terminalState.reset();
 		this.skippedEntries = 0;
 	}
 
@@ -292,6 +303,7 @@ export class CodeScrimRecordingBuffer {
 		this.checkpoints.length = 0;
 		this.activeResource = undefined;
 		this.selections = undefined;
+		this.terminalState.reset();
 		this.skippedEntries = 0;
 		return draft;
 	}
@@ -323,6 +335,7 @@ export class CodeScrimRecordingBuffer {
 			documents: Object.freeze([...this.documents.values()]),
 			entries: Object.freeze([...this.entries.values()]),
 			skippedEntryCount: this.skippedEntries,
+			...this.terminalState.snapshot,
 		}));
 	}
 
@@ -364,6 +377,9 @@ export class CodeScrimRecordingBuffer {
 				this.selections = Object.freeze(event.payload.selections.map(selection => Object.freeze({ ...selection })));
 				break;
 			case 'editor.documentSaved':
+				break;
+			default:
+				this.terminalState.apply(event);
 				break;
 		}
 	}

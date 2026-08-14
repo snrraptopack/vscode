@@ -21,8 +21,10 @@ import { EditorResourceAccessor, SideBySideEditor } from '../../../common/editor
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
+import { ITerminalService } from '../../terminal/browser/terminal.js';
 import { ICodeScrimPackageService } from '../common/codeScrimPackage.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEventData, CodeScrimRecordingState, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
+import { CodeScrimTerminalRecorder } from './codeScrimTerminalRecorder.js';
 
 const MAX_CHECKPOINT_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_CHECKPOINT_TOTAL_SIZE = 64 * 1024 * 1024;
@@ -40,6 +42,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 	declare readonly _serviceBrand: undefined;
 
 	private readonly buffer = new CodeScrimRecordingBuffer();
+	private readonly terminalRecorder: CodeScrimTerminalRecorder;
 	private readonly recordingListeners = this._register(new MutableDisposable<DisposableStore>());
 	private readonly recordingStatus = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
 	private readonly stopRecordingStatus = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
@@ -69,10 +72,12 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		@ICodeScrimPackageService private readonly packageService: ICodeScrimPackageService,
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
 		@ITextFileService private readonly textFileService: ITextFileService,
+		@ITerminalService terminalService: ITerminalService,
 		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
+		this.terminalRecorder = new CodeScrimTerminalRecorder(terminalService, event => this.append(event));
 		this.syncStatusbar();
 	}
 
@@ -94,6 +99,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		const draftId = generateUuid();
 		this.publishPreparing();
 		this.knownWorkspaceResources.clear();
+		this.terminalRecorder.reset();
 		try {
 			const budget = this.createSnapshotBudget();
 			const entries: ICodeScrimWorkspaceEntryCheckpoint[] = [];
@@ -215,6 +221,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 			this.pendingWorkspaceChanges = this.pendingWorkspaceChanges
 				.then(() => this.recordWorkspaceChanges(event));
 		}));
+		this.terminalRecorder.attach(listeners);
 		return listeners;
 	}
 

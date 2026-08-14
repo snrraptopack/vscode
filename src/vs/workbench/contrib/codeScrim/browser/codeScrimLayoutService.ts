@@ -63,6 +63,10 @@ export class CodeScrimLayoutService extends Disposable implements ICodeScrimLayo
 			Parts.AUXILIARYBAR_PART,
 			Parts.STATUSBAR_PART,
 		] as const;
+		// The panel starts hidden with the rest of the learner chrome, but unlike the other
+		// workbench parts it may be revealed afterwards. CodeScrim terminal replay is hosted in
+		// the real Terminal panel so its native sash, toolbar and toggle commands keep working.
+		const enforcedHiddenParts = parts.filter(part => part !== Parts.PANEL_PART);
 		const partVisibility = parts.map(part => ({
 			part,
 			visible: this.layoutService.isVisible(part, mainWindow),
@@ -77,7 +81,7 @@ export class CodeScrimLayoutService extends Disposable implements ICodeScrimLayo
 				return;
 			}
 
-			const part = parts.find(candidate => candidate === partId);
+			const part = enforcedHiddenParts.find(candidate => candidate === partId);
 			if (part) {
 				this.layoutService.setPartHidden(true, part);
 			}

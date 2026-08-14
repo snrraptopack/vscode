@@ -93,6 +93,7 @@ suite('CodeScrimRecordingBuffer', () => {
 					text: true,
 				}],
 				skippedEntryCount: 1,
+				terminals: [],
 			}, {
 				timestamp: 25_000,
 				eventIndex: 1,
@@ -111,6 +112,7 @@ suite('CodeScrimRecordingBuffer', () => {
 					text: true,
 				}],
 				skippedEntryCount: 1,
+				terminals: [],
 			}],
 			events: [{
 				id: 'draft-two:0',
@@ -201,6 +203,32 @@ suite('CodeScrimRecordingBuffer', () => {
 		assert.strictEqual(draft?.checkpoints.at(-1)?.documents[0]?.text, 'const created = true;');
 		assert.strictEqual(draft?.checkpoints.at(-1)?.documents[0]?.languageId, 'typescript');
 		assert.strictEqual(draft?.checkpoints.at(-1)?.eventIndex, 2);
+	});
+
+	test('checkpoints passive terminal output and dimensions', () => {
+		const buffer = new CodeScrimRecordingBuffer();
+		buffer.start('draft-terminal', 0);
+		buffer.append({
+			domain: 'terminal',
+			kind: 'terminal.created',
+			payload: { terminalId: 3, title: 'PowerShell', cols: 100, rows: 24, cwd: 'C:\\lesson' },
+		}, 1);
+		buffer.append({ domain: 'terminal', kind: 'terminal.activeChanged', payload: { terminalId: 3 } }, 2);
+		buffer.append({ domain: 'terminal', kind: 'terminal.input', payload: { terminalId: 3, data: 'npm test\r' } }, 3);
+		buffer.append({ domain: 'terminal', kind: 'terminal.data', payload: { terminalId: 3, data: '\u001b[32mpassed\u001b[0m\r\n' } }, 4);
+		buffer.append({ domain: 'terminal', kind: 'terminal.dimensionsChanged', payload: { terminalId: 3, cols: 120, rows: 30 } }, 5);
+
+		const checkpoint = buffer.stop(6)?.checkpoints.at(-1);
+		assert.strictEqual(checkpoint?.activeTerminalId, 3);
+		assert.deepStrictEqual(checkpoint?.terminals, [{
+			terminalId: 3,
+			title: 'PowerShell',
+			cols: 120,
+			rows: 30,
+			cwd: 'C:\\lesson',
+			output: '\u001b[32mpassed\u001b[0m\r\n',
+			exited: false,
+		}]);
 	});
 
 	test('creates automatic checkpoints from time and event-volume thresholds', () => {

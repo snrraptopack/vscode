@@ -83,7 +83,7 @@ suite('CodeScrim checkpoint index', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
 	test('finds the nearest checkpoint at or before the target', () => {
-		const checkpoint = (timestamp: number, eventIndex: number) => ({ timestamp, eventIndex, documents: [], entries: [], skippedEntryCount: 0 });
+		const checkpoint = (timestamp: number, eventIndex: number) => ({ timestamp, eventIndex, documents: [], entries: [], skippedEntryCount: 0, terminals: [] });
 		const checkpoints = [checkpoint(0, 0), checkpoint(30_000, 20), checkpoint(60_000, 45)];
 
 		assert.strictEqual(findCodeScrimCheckpoint(checkpoints, 0), checkpoints[0]);

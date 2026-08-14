@@ -25,7 +25,7 @@ suite('CodeScrimPackageCodec', () => {
 			decoded,
 			plaintextVisible: encoded.toString().includes('private source text'),
 		}, {
-			header: { packageId: 'package-test', keyId: 'author-key', major: 2, minor: 0 },
+			header: { packageId: 'package-test', keyId: 'author-key', major: 3, minor: 0 },
 			decoded: draft,
 			plaintextVisible: false,
 		});
@@ -111,6 +111,8 @@ function createDraft(): ICodeScrimRecordingDraft {
 				text: true,
 			}],
 			skippedEntryCount: 0,
+			terminals: [{ terminalId: 1, title: 'PowerShell', cols: 80, rows: 24, output: '\u001b[32mready\u001b[0m', exited: false }],
+			activeTerminalId: 1,
 		}],
 		events: [{
 			id: 'package-test:0',
@@ -129,6 +131,14 @@ function createDraft(): ICodeScrimRecordingDraft {
 				undoing: false,
 				redoing: false,
 			},
+		}, {
+			id: 'package-test:1',
+			version: 1,
+			timestamp: 1_500,
+			sequence: 1,
+			domain: 'terminal',
+			kind: 'terminal.data',
+			payload: { terminalId: 1, data: '\u001b[32mready\u001b[0m' },
 		}],
 	};
 }

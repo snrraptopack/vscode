@@ -39,6 +39,7 @@ import { CodeScrimRecordingBuffer, ICodeScrimSelection, ICodeScrimWorkspaceEntry
 import { CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
 import { CodeScrimLessonEditorInput } from './codeScrimLessonEditorInput.js';
+import { CodeScrimTerminalSurface } from './codeScrimTerminalSurface.js';
 
 interface ITranscriptEntry {
 	readonly start: number;
@@ -62,6 +63,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private replayTabs: HTMLElement | undefined;
 	private editorHost: HTMLElement | undefined;
 	private codeEditor: CodeEditorWidget | undefined;
+	private terminalSurface: CodeScrimTerminalSurface | undefined;
 	private diffEditorHost: HTMLElement | undefined;
 	private diffEditor: DiffEditorWidget | undefined;
 	private navigationRevealButton: HTMLButtonElement | undefined;
@@ -178,6 +180,10 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			this.root.style.height = `${dimension.height}px`;
 		}
 		this.layoutCodeEditor();
+	}
+
+	async toggleTerminalPanel(): Promise<void> {
+		await this.terminalSurface?.togglePanel();
 	}
 
 	openResource(resource: ICodeScrimWorkspaceResource, model: ITextModel): void {
@@ -349,6 +355,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			originalAriaLabel: localize('codeScrim.instructorVersion', "Instructor version"),
 			modifiedAriaLabel: localize('codeScrim.learnerVersion', "Learner version"),
 		}, {}));
+		this.terminalSurface = this._register(this.instantiationService.createInstance(CodeScrimTerminalSurface));
 		const playButton = DOM.append(content, DOM.$('button.codescrim-session-stage-play', {
 			type: 'button',
 			'aria-label': localize('codeScrim.playLessonFromStage', "Play lesson"),

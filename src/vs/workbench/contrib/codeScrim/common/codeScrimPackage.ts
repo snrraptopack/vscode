@@ -7,13 +7,14 @@ import { decodeBase64, encodeBase64, VSBuffer } from '../../../../base/common/bu
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { URI } from '../../../../base/common/uri.js';
 import { CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
+import { ICodeScrimTerminalCheckpoint } from './codeScrimTerminal.js';
 
 export const CODE_SCRIM_SAVE_RECORDING_COMMAND_ID = 'codescrim.saveRecording';
 export const CODE_SCRIM_OPEN_RECORDING_COMMAND_ID = 'codescrim.openRecording';
 export const CODE_SCRIM_PACKAGE_EXTENSION = 'scrim';
 
 const PACKAGE_MAGIC = new Uint8Array([0x43, 0x4f, 0x44, 0x45, 0x53, 0x43, 0x52, 0x4d]); // CODESCRM
-const PACKAGE_MAJOR_VERSION = 2;
+const PACKAGE_MAJOR_VERSION = 3;
 const PACKAGE_MINOR_VERSION = 0;
 const PACKAGE_HEADER_LENGTH_BYTES = 4;
 const PACKAGE_MAX_HEADER_BYTES = 16 * 1024;
@@ -46,6 +47,10 @@ interface ICodeScrimPackagedEntry extends Omit<ICodeScrimWorkspaceEntryCheckpoin
 	readonly contentsBlob?: string;
 }
 
+interface ICodeScrimPackagedTerminal extends Omit<ICodeScrimTerminalCheckpoint, 'output'> {
+	readonly outputBlob: string;
+}
+
 interface ICodeScrimEventChunk {
 	readonly blob: string;
 	readonly firstTimestamp: number;
@@ -62,12 +67,14 @@ interface ICodeScrimPackagedCheckpoint {
 	readonly documents: readonly ICodeScrimPackagedDocument[];
 	readonly entries: readonly ICodeScrimPackagedEntry[];
 	readonly skippedEntryCount: number;
+	readonly terminals: readonly ICodeScrimPackagedTerminal[];
+	readonly activeTerminalId?: number;
 }
 
 interface ICodeScrimPackagePayload {
 	readonly manifest: {
 		readonly format: 'codescrim-session';
-		readonly schemaVersion: 2;
+		readonly schemaVersion: 3;
 		readonly sessionId: string;
 		readonly duration: number;
 		readonly timebase: 'microseconds';
@@ -194,6 +201,11 @@ export class CodeScrimPackageCodec {
 					contentsBlob: contents === undefined ? undefined : await storeBlob(decodeBase64(contents).buffer),
 				});
 			}
+			const terminals: ICodeScrimPackagedTerminal[] = [];
+			for (const terminal of checkpoint.terminals) {
+				const { output, ...metadata } = terminal;
+				terminals.push({ ...metadata, outputBlob: await storeBlob(VSBuffer.fromString(output).buffer) });
+			}
 			checkpoints.push({
 				timestamp: checkpoint.timestamp,
 				eventIndex: checkpoint.eventIndex,
@@ -202,6 +214,8 @@ export class CodeScrimPackageCodec {
 				documents,
 				entries,
 				skippedEntryCount: checkpoint.skippedEntryCount,
+				terminals,
+				activeTerminalId: checkpoint.activeTerminalId,
 			});
 		}
 
@@ -221,7 +235,7 @@ export class CodeScrimPackageCodec {
 		return {
 			manifest: {
 				format: 'codescrim-session',
-				schemaVersion: 2,
+				schemaVersion: 3,
 				sessionId: draft.id,
 				duration: draft.duration,
 				timebase: 'microseconds',
@@ -266,6 +280,11 @@ export class CodeScrimPackageCodec {
 					contents: contentsBlob === undefined ? undefined : encodeBase64(await readBlob(contentsBlob)),
 				});
 			}
+			const terminals: ICodeScrimTerminalCheckpoint[] = [];
+			for (const terminal of packaged.terminals) {
+				const { outputBlob, ...metadata } = terminal;
+				terminals.push({ ...metadata, output: (await readBlob(outputBlob)).toString() });
+			}
 			checkpoints.push({
 				timestamp: packaged.timestamp,
 				eventIndex: packaged.eventIndex,
@@ -274,6 +293,8 @@ export class CodeScrimPackageCodec {
 				documents,
 				entries,
 				skippedEntryCount: packaged.skippedEntryCount,
+				terminals,
+				...(packaged.activeTerminalId === undefined ? {} : { activeTerminalId: packaged.activeTerminalId }),
 			});
 		}
 
@@ -363,7 +384,7 @@ function parseHeader(candidate: unknown): ICodeScrimPackageHeader {
 
 function parsePayload(candidate: unknown): ICodeScrimPackagePayload {
 	if (!isRecord(candidate) || !isRecord(candidate.manifest) || candidate.manifest.format !== 'codescrim-session' ||
-		candidate.manifest.schemaVersion !== 2 || typeof candidate.manifest.sessionId !== 'string' || !candidate.manifest.sessionId ||
+		candidate.manifest.schemaVersion !== 3 || typeof candidate.manifest.sessionId !== 'string' || !candidate.manifest.sessionId ||
 		!isSafeInteger(candidate.manifest.duration) || candidate.manifest.duration < 0 || candidate.manifest.timebase !== 'microseconds' ||
 		!isSafeInteger(candidate.manifest.eventCount) || candidate.manifest.eventCount < 0 || candidate.manifest.eventCount > PACKAGE_MAX_EVENT_COUNT ||
 		!Array.isArray(candidate.manifest.checkpoints) || !candidate.manifest.checkpoints.length || candidate.manifest.checkpoints.length > PACKAGE_MAX_CHECKPOINT_COUNT ||
@@ -373,7 +394,7 @@ function parsePayload(candidate: unknown): ICodeScrimPackagePayload {
 	for (const checkpoint of candidate.manifest.checkpoints) {
 		if (!isRecord(checkpoint) || !isSafeInteger(checkpoint.timestamp) || checkpoint.timestamp < 0 ||
 			!isSafeInteger(checkpoint.eventIndex) || checkpoint.eventIndex < 0 || !Array.isArray(checkpoint.documents) ||
-			!Array.isArray(checkpoint.entries) || checkpoint.documents.length > PACKAGE_MAX_ENTRY_COUNT || checkpoint.entries.length > PACKAGE_MAX_ENTRY_COUNT) {
+			!Array.isArray(checkpoint.entries) || !Array.isArray(checkpoint.terminals) || checkpoint.documents.length > PACKAGE_MAX_ENTRY_COUNT || checkpoint.entries.length > PACKAGE_MAX_ENTRY_COUNT) {
 			throw new Error('The CodeScrim package checkpoint index is invalid.');
 		}
 	}
@@ -393,7 +414,7 @@ function validateDraft(draft: ICodeScrimRecordingDraft): void {
 		if (!isSafeInteger(checkpoint.timestamp) || checkpoint.timestamp < 0 || checkpoint.timestamp > draft.duration ||
 			!isSafeInteger(checkpoint.eventIndex) || checkpoint.eventIndex < 0 || checkpoint.eventIndex > draft.events.length ||
 			checkpoint.timestamp < previousCheckpointTimestamp || checkpoint.eventIndex <= previousCheckpointEventIndex ||
-			checkpoint.entries.length > PACKAGE_MAX_ENTRY_COUNT || checkpoint.documents.length > PACKAGE_MAX_ENTRY_COUNT) {
+			checkpoint.entries.length > PACKAGE_MAX_ENTRY_COUNT || checkpoint.documents.length > PACKAGE_MAX_ENTRY_COUNT || !Array.isArray(checkpoint.terminals)) {
 			throw new Error('The CodeScrim checkpoint index is invalid.');
 		}
 		const precedingEvent = draft.events[checkpoint.eventIndex - 1];
@@ -423,7 +444,7 @@ function validateDraft(draft: ICodeScrimRecordingDraft): void {
 	for (const event of draft.events) {
 		if (!event || typeof event.id !== 'string' || event.version !== 1 || !isSafeInteger(event.timestamp) || event.timestamp < 0 ||
 			!isSafeInteger(event.sequence) || event.sequence < 0 || event.sequence <= previousSequence || event.timestamp < previousTimestamp ||
-			(event.domain !== 'editor' && event.domain !== 'workspace') || typeof event.kind !== 'string' || !isRecord(event.payload)) {
+			(event.domain !== 'editor' && event.domain !== 'workspace' && event.domain !== 'terminal') || typeof event.kind !== 'string' || !isRecord(event.payload)) {
 			throw new Error('The CodeScrim event stream is invalid or out of order.');
 		}
 		validateEventPayload(event);
@@ -444,6 +465,12 @@ function validateCheckpointContents(checkpoint: ICodeScrimRecordingCheckpoint): 
 		if ((entry.type !== 'file' && entry.type !== 'directory') || typeof entry.text !== 'boolean' || (entry.contents !== undefined && typeof entry.contents !== 'string')) {
 			throw new Error('The CodeScrim workspace checkpoint is invalid.');
 		}
+	}
+	for (const terminal of checkpoint.terminals) {
+		validateTerminalCheckpoint(terminal);
+	}
+	if (checkpoint.activeTerminalId !== undefined && !isSafeInteger(checkpoint.activeTerminalId)) {
+		throw new Error('The CodeScrim active terminal checkpoint is invalid.');
 	}
 }
 
@@ -495,7 +522,61 @@ function validateEventPayload(event: CodeScrimRecordingEvent): void {
 				}
 			}
 			return;
+		case 'terminal.created':
+			if (!isTerminalId(event.payload.terminalId) || typeof event.payload.title !== 'string' || !isTerminalDimension(event.payload.cols) ||
+				!isTerminalDimension(event.payload.rows) || (event.payload.cwd !== undefined && typeof event.payload.cwd !== 'string')) {
+				throw new Error('The CodeScrim terminal-created event is invalid.');
+			}
+			return;
+		case 'terminal.activeChanged':
+			if (event.payload.terminalId !== undefined && !isTerminalId(event.payload.terminalId)) {
+				throw new Error('The CodeScrim active-terminal event is invalid.');
+			}
+			return;
+		case 'terminal.data':
+		case 'terminal.input':
+			if (!isTerminalId(event.payload.terminalId) || typeof event.payload.data !== 'string') {
+				throw new Error('The CodeScrim terminal data event is invalid.');
+			}
+			return;
+		case 'terminal.dimensionsChanged':
+			if (!isTerminalId(event.payload.terminalId) || !isTerminalDimension(event.payload.cols) || !isTerminalDimension(event.payload.rows)) {
+				throw new Error('The CodeScrim terminal-dimensions event is invalid.');
+			}
+			return;
+		case 'terminal.titleChanged':
+			if (!isTerminalId(event.payload.terminalId) || typeof event.payload.title !== 'string') {
+				throw new Error('The CodeScrim terminal-title event is invalid.');
+			}
+			return;
+		case 'terminal.exited':
+			if (!isTerminalId(event.payload.terminalId) || (event.payload.exitCode !== undefined && !isSafeInteger(event.payload.exitCode))) {
+				throw new Error('The CodeScrim terminal-exit event is invalid.');
+			}
+			return;
+		case 'terminal.disposed':
+			if (!isTerminalId(event.payload.terminalId)) {
+				throw new Error('The CodeScrim terminal-disposed event is invalid.');
+			}
+			return;
 	}
+}
+
+function validateTerminalCheckpoint(terminal: ICodeScrimTerminalCheckpoint): void {
+	if (!isTerminalId(terminal.terminalId) || typeof terminal.title !== 'string' || !isTerminalDimension(terminal.cols) ||
+		!isTerminalDimension(terminal.rows) || (terminal.cwd !== undefined && typeof terminal.cwd !== 'string') ||
+		typeof terminal.output !== 'string' || typeof terminal.exited !== 'boolean' ||
+		(terminal.exitCode !== undefined && !isSafeInteger(terminal.exitCode))) {
+		throw new Error('The CodeScrim terminal checkpoint is invalid.');
+	}
+}
+
+function isTerminalId(candidate: unknown): candidate is number {
+	return isSafeInteger(candidate) && candidate >= 0;
+}
+
+function isTerminalDimension(candidate: unknown): candidate is number {
+	return isSafeInteger(candidate) && candidate > 0;
 }
 
 function validateResource(resource: ICodeScrimWorkspaceResource): void {

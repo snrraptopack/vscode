@@ -8,6 +8,7 @@ import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
+import { ICodeScrimTerminalState } from './codeScrimTerminal.js';
 
 export const CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID = 'codescrim.replayLastRecording';
 export const CODE_SCRIM_RESTART_REPLAY_COMMAND_ID = 'codescrim.restartReplay';
@@ -236,10 +237,12 @@ export interface ICodeScrimReplayService {
 	readonly learnerState: ICodeScrimLearnerState;
 	readonly learnerExperiments: readonly ICodeScrimLearnerExperiment[];
 	readonly activeLearnerExperimentId: string | undefined;
+	readonly terminalState: ICodeScrimTerminalState;
 	readonly onDidChangeState: Event<CodeScrimReplayState>;
 	readonly onDidChangeWorkspace: Event<void>;
 	readonly onDidChangeLearnerState: Event<ICodeScrimLearnerState>;
 	readonly onDidChangeLearnerExperiments: Event<readonly ICodeScrimLearnerExperiment[]>;
+	readonly onDidChangeTerminalState: Event<ICodeScrimTerminalState>;
 
 	replay(draft: ICodeScrimRecordingDraft): Promise<boolean>;
 	restart(): Promise<boolean>;

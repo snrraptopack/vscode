@@ -3,10 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { Codicon } from '../../../../base/common/codicons.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { basename, extname, joinPath } from '../../../../base/common/resources.js';
-import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
@@ -16,9 +17,11 @@ import { INotificationService } from '../../../../platform/notification/common/n
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/editor.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
+import { ActiveEditorContext } from '../../../common/contextkeys.js';
 import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { TerminalContextKeys } from '../../terminal/common/terminalContextKey.js';
 import { CODE_SCRIM_OPEN_RECORDING_COMMAND_ID, CODE_SCRIM_PACKAGE_EXTENSION, CODE_SCRIM_SAVE_RECORDING_COMMAND_ID, ICodeScrimPackageService } from '../common/codeScrimPackage.js';
 import { CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft } from '../common/codeScrimRecording.js';
 import { CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID, CODE_SCRIM_RESTART_REPLAY_COMMAND_ID, CODE_SCRIM_RESUME_REPLAY_COMMAND_ID, CODE_SCRIM_STOP_REPLAY_COMMAND_ID, ICodeScrimReplayService } from '../common/codeScrimReplay.js';
@@ -122,6 +125,31 @@ Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEdit
 	CodeScrimLessonEditorInput.ID,
 	CodeScrimLessonEditorInputSerializer
 );
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'workbench.action.codeScrim.toggleLearnerTerminal',
+			title: localize2('codeScrim.toggleLearnerTerminal', "Toggle Terminal"),
+			icon: Codicon.terminal,
+			toggled: TerminalContextKeys.viewShowing,
+			f1: false,
+			menu: {
+				id: MenuId.TitleBar,
+				group: 'navigation',
+				order: 9000,
+				when: ActiveEditorContext.isEqualTo(CodeScrimLessonEditorInput.EDITOR_ID),
+			},
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const activeEditorPane = accessor.get(IEditorService).activeEditorPane;
+		if (activeEditorPane instanceof CodeScrimLessonEditor) {
+			await activeEditorPane.toggleTerminalPanel();
+		}
+	}
+});
 
 registerAction2(class extends Action2 {
 	constructor() {
@@ -437,7 +465,7 @@ registerAction2(class extends Action2 {
 		const notificationService = accessor.get(INotificationService);
 		const draft = await recorderService.stopRecording();
 		if (draft) {
-			notificationService.info(localize('codeScrim.recordingStopped', "CodeScrim recording stopped with {0} editor events.", draft.events.length));
+			notificationService.info(localize('codeScrim.recordingStopped', "CodeScrim recording stopped with {0} events.", draft.events.length));
 		} else {
 			notificationService.info(localize('codeScrim.noActiveRecording', "There is no active CodeScrim recording."));
 		}

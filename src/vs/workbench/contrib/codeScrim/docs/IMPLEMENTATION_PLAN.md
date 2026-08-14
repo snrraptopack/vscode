@@ -86,7 +86,7 @@ Acceptance criteria:
 - Replay writes are not captured as learner events.
 - A short native recording can be replayed without changing its final file contents or event ordering.
 
-Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, checkpoint-indexed seek, restart, manual file inspection, deterministic resume, and quiet learner experimentation now work for workspace and editor events. The checkpoint index captures portable file bytes, unsaved document text, active files, and selections under explicit safety limits. Replay owns an immutable instructor model plus a separately editable learner model for each materialized file. Editing pauses the instructor clock without adding another banner. Continue captures changed files in an in-memory learner checkpoint, silently restores the exact instructor frame, and resumes from that timestamp. Each captured experiment appears as a marker on the playback timeline; its compact inspector provides native diff review plus Restore, Keep, and Delete actions. Published key distribution/signatures, captured diagnostics, and non-editor domains are intentionally not claimed yet.
+Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, checkpoint-indexed seek, restart, manual file inspection, deterministic resume, and quiet learner experimentation now work for workspace, editor, and passive terminal events. The checkpoint index captures portable file bytes, unsaved document text, active files, selections, and accumulated terminal presentation under explicit safety limits. Replay owns an immutable instructor model plus a separately editable learner model for each materialized file. Recorded ANSI output is rendered in VS Code's native integrated Terminal panel through a read-only replay PTY; no command is executed during replay. Editing pauses the instructor clock without adding another banner. Continue captures changed files in an in-memory learner checkpoint, silently restores the exact instructor frame, and resumes from that timestamp. Each captured experiment appears as a marker on the playback timeline; its compact inspector provides native diff review plus Restore, Keep, and Delete actions. Published key distribution/signatures, captured diagnostics, and remaining domains are intentionally not claimed yet.
 
 ## Milestone 3: Native browser integration
 
@@ -102,8 +102,9 @@ Acceptance criteria:
 
 ## Milestone 4: Terminal and debugging
 
-- Capture terminal lifecycle, input, output, commands, working directories, dimensions, and exit state.
-- Replay recorded terminal presentation without executing commands.
+- [x] Capture terminal lifecycle, input, raw output, working directories, dimensions, title, and exit state.
+- [x] Replay and seek recorded terminal presentation through the native integrated Terminal panel and a read-only replay PTY without executing commands.
+- Add shell-integration command boundaries and terminal switching controls.
 - Provide a real learner terminal rooted in the learner workspace.
 - Capture debug lifecycle, breakpoints, focus, stack, variables, REPL, and relevant errors.
 - Define runnable checkpoints for exercises that require live debug state.

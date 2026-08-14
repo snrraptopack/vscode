@@ -20,6 +20,8 @@ import { INotificationService } from '../../../../platform/notification/common/n
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
+import { ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
+import { CodeScrimTerminalReplay } from './codeScrimTerminalReplay.js';
 
 const REPLAY_TICK_INTERVAL = 16;
 
@@ -28,6 +30,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	declare readonly _serviceBrand: undefined;
 
 	private readonly cursor = new CodeScrimReplayCursor();
+	private readonly terminalReplay = this._register(new CodeScrimTerminalReplay());
 	private readonly learnerOverlays = new CodeScrimLearnerOverlayStore();
 	private readonly operations = new Sequencer();
 	private readonly models = this._register(new DisposableMap<string, ITextModel>());
@@ -59,6 +62,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	readonly onDidChangeLearnerState = this._onDidChangeLearnerState.event;
 	private readonly _onDidChangeLearnerExperiments = this._register(new Emitter<readonly ICodeScrimLearnerExperiment[]>());
 	readonly onDidChangeLearnerExperiments = this._onDidChangeLearnerExperiments.event;
+	readonly onDidChangeTerminalState = this.terminalReplay.onDidChangeState;
 	private applyingInstructorText = false;
 
 	get state(): CodeScrimReplayState {
@@ -83,6 +87,10 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 	get activeLearnerExperimentId(): string | undefined {
 		return this._activeLearnerExperimentId;
+	}
+
+	get terminalState(): ICodeScrimTerminalState {
+		return this.terminalReplay.state;
 	}
 
 	constructor(
@@ -140,6 +148,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this.operationVersion++;
 		this.timer.clear();
 		this.ticking = false;
+		this.terminalReplay.reset();
 		this.publishIdle();
 	}
 
@@ -475,6 +484,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this.replayActiveResource = undefined;
 		this.pendingActiveResource = undefined;
 		this.surface?.clear();
+		this.terminalReplay.reset({ terminals: checkpoint.terminals, activeTerminalId: checkpoint.activeTerminalId });
 
 		for (const entry of checkpoint.entries) {
 			const key = CodeScrimRecordingBuffer.resourceKey(entry.resource);
@@ -618,6 +628,9 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			}
 			case 'editor.documentSaved':
 				// Saves are presentation markers during passive replay. Instructor code is never written to disk here.
+				break;
+			default:
+				this.terminalReplay.apply(event);
 				break;
 		}
 		return false;
