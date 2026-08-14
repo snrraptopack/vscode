@@ -133,7 +133,9 @@ Before materialization, the package service validates:
 
 Opening a lesson never automatically executes terminal commands, tasks, debug configurations, workspace scripts, or downloaded binaries. Executable actions require an explicit trust and learner interaction model.
 
-Passive replay and learner execution are separate capabilities. A replay package describes state and recorded presentation; it is not itself a sandbox. When secure execution is implemented, the learner's explicit run action will materialize a writable overlay into an environment whose actual isolation guarantees are declared by the host.
+Passive replay and learner execution are separate capabilities. A replay package describes state and recorded presentation; it is not itself a sandbox. Replay may project that state into a disposable CodeScrim-owned directory so native file-based tooling can inspect it, but no recorded command is executed. When secure execution is implemented, the learner's explicit run action will enter an environment whose actual isolation guarantees are declared by the host.
+
+Files and folders created from the learner Files tab belong to the learner branch, not the recording package or instructor event stream. Capturing an experiment stores those structural entries together with learner text, removes them while the immutable instructor timeline continues, and restores them only when that experiment is reopened.
 
 ## Compatibility
 

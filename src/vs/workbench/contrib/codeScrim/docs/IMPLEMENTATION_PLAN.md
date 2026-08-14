@@ -73,6 +73,9 @@ Status: in progress.
 - Keep captured instructor diagnostics separate from optional live diagnostics produced by a future learner sandbox.
 - [x] Enter learner edit mode immediately on editing and pause before the instructor timeline advances.
 - [x] Expose learner models to native language features without materializing them in the host workspace.
+- [x] Project checkpoints into a disposable CodeScrim-owned learner workspace with file-backed model URIs and crash recovery.
+- [x] Let learners create files and folders from the Files tab and preserve those entries as learner experiment state.
+- [x] Replace the learner's flat file list with a native workbench tree supporting folder expansion, context creation, and constrained drag/drop.
 - [x] Capture learner changes as an in-memory checkpoint, restore the paused instructor frame, and continue from the same timestamp.
 - [x] Render learner-edit markers on the playback timeline.
 - [x] Make a marker open the learner checkpoint captured at that position.
@@ -86,7 +89,7 @@ Acceptance criteria:
 - Replay writes are not captured as learner events.
 - A short native recording can be replayed without changing its final file contents or event ordering.
 
-Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, checkpoint-indexed seek, restart, manual file inspection, deterministic resume, and quiet learner experimentation now work for workspace, editor, and passive terminal events. The checkpoint index captures portable file bytes, unsaved document text, active files, selections, and accumulated terminal presentation under explicit safety limits. Replay owns an immutable instructor model plus a separately editable learner model for each materialized file. Recorded ANSI output is rendered in VS Code's native integrated Terminal panel through a read-only replay PTY; no command is executed during replay. Editing pauses the instructor clock without adding another banner. Continue captures changed files in an in-memory learner checkpoint, silently restores the exact instructor frame, and resumes from that timestamp. Each captured experiment appears as a marker on the playback timeline; its compact inspector provides native diff review plus Restore, Keep, and Delete actions. Published key distribution/signatures, captured diagnostics, and remaining domains are intentionally not claimed yet.
+Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, checkpoint-indexed seek, restart, manual file inspection, learner-owned file/folder creation, deterministic resume, and quiet learner experimentation now work for workspace, editor, and passive terminal events. The checkpoint index captures portable file bytes, unsaved document text, active files, selections, and accumulated terminal presentation under explicit safety limits. Replay owns an immutable instructor model plus a separately editable learner model for each materialized file. Recorded ANSI output is rendered in VS Code's native integrated Terminal panel through a read-only replay PTY; no command is executed during replay. Editing or creating a workspace entry pauses the instructor clock without adding another banner. Continue captures changed files and created entries in an in-memory learner checkpoint, silently restores the exact instructor frame, and resumes from that timestamp. Each captured experiment appears as a marker on the playback timeline; its compact inspector provides native diff review plus Restore, Keep, and Delete actions. Published key distribution/signatures, captured diagnostics, and remaining domains are intentionally not claimed yet.
 
 ## Milestone 3: Native browser integration
 
@@ -138,7 +141,7 @@ Acceptance criteria:
 
 ## Milestone 7: Secure learner execution
 
-- Materialize a learner workspace from an instructor checkpoint without mutating instructor state.
+- [x] Materialize a learner workspace from an instructor checkpoint without mutating instructor state.
 - Require an explicit learner action before running code, tasks, terminal commands, debug configurations, or project scripts.
 - Define local sandbox and remote/container runner capability levels.
 - Enforce process, CPU, memory, disk, time, network, secret, and filesystem policies.

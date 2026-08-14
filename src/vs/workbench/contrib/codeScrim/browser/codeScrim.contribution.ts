@@ -25,11 +25,13 @@ import { TerminalContextKeys } from '../../terminal/common/terminalContextKey.js
 import { CODE_SCRIM_OPEN_RECORDING_COMMAND_ID, CODE_SCRIM_PACKAGE_EXTENSION, CODE_SCRIM_SAVE_RECORDING_COMMAND_ID, ICodeScrimPackageService } from '../common/codeScrimPackage.js';
 import { CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft } from '../common/codeScrimRecording.js';
 import { CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID, CODE_SCRIM_RESTART_REPLAY_COMMAND_ID, CODE_SCRIM_RESUME_REPLAY_COMMAND_ID, CODE_SCRIM_STOP_REPLAY_COMMAND_ID, ICodeScrimReplayService } from '../common/codeScrimReplay.js';
+import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, CODE_SCRIM_OPEN_DEMO_LESSON_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimLessonDescriptor, ICodeScrimSessionService } from '../common/codeScrimSession.js';
 import { CodeScrimCourseEditor } from './codeScrimCourseEditor.js';
 import { CodeScrimCourseEditorInput } from './codeScrimCourseEditorInput.js';
 import { CodeScrimAuthoringDockContribution } from './codeScrimAuthoringDock.js';
 import { CodeScrimLayoutService } from './codeScrimLayoutService.js';
+import { CodeScrimLearnerWorkspaceService } from './codeScrimLearnerWorkspaceService.js';
 import { CodeScrimLessonEditor } from './codeScrimLessonEditor.js';
 import { CodeScrimLessonEditorInput } from './codeScrimLessonEditorInput.js';
 import { CodeScrimPackageService } from './codeScrimPackageService.js';
@@ -39,6 +41,7 @@ import { CodeScrimSessionService } from './codeScrimSessionService.js';
 
 registerSingleton(ICodeScrimSessionService, CodeScrimSessionService, InstantiationType.Delayed);
 registerSingleton(ICodeScrimLayoutService, CodeScrimLayoutService, InstantiationType.Delayed);
+registerSingleton(ICodeScrimLearnerWorkspaceService, CodeScrimLearnerWorkspaceService, InstantiationType.Delayed);
 registerSingleton(ICodeScrimPackageService, CodeScrimPackageService, InstantiationType.Delayed);
 registerSingleton(ICodeScrimRecorderService, CodeScrimRecorderService, InstantiationType.Eager);
 registerSingleton(ICodeScrimReplayService, CodeScrimReplayService, InstantiationType.Delayed);

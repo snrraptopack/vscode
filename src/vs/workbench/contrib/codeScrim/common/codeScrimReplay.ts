@@ -28,7 +28,7 @@ export function collectCodeScrimTerminalCommands(events: readonly CodeScrimRecor
 		} else if (event.kind === 'terminal.commandFinished') {
 			const index = commandIndexes.get(event.payload.commandId);
 			const command = index === undefined ? undefined : commands[index];
-			if (command && command.terminalId === event.payload.terminalId) {
+			if (index !== undefined && command && command.terminalId === event.payload.terminalId) {
 				commands[index] = Object.freeze({
 					...command,
 					...(event.payload.cwd === undefined ? {} : { cwd: event.payload.cwd }),
@@ -117,6 +117,7 @@ export interface ICodeScrimLearnerExperiment {
 	readonly id: string;
 	readonly position: number;
 	readonly changes: readonly ICodeScrimLearnerExperimentChange[];
+	readonly createdEntries: readonly ICodeScrimWorkspaceEntryCheckpoint[];
 }
 
 interface ICodeScrimLearnerOverlay {
@@ -300,9 +301,14 @@ export interface ICodeScrimReplayService {
 	resume(): void;
 	stop(): void;
 	openResource(resource: ICodeScrimWorkspaceResource): Promise<void>;
+	createLearnerFile(path: string, root?: number): Promise<ICodeScrimWorkspaceResource>;
+	createLearnerFolder(path: string, root?: number): Promise<ICodeScrimWorkspaceResource>;
+	deleteLearnerResource(resource: ICodeScrimWorkspaceResource): Promise<boolean>;
+	synchronizeLearnerWorkspace(): Promise<void>;
+	isLearnerCreated(resource: ICodeScrimWorkspaceResource): boolean;
 	openLearnerExperiment(id: string): Promise<void>;
-	restoreLearnerExperiment(id: string): boolean;
-	deleteLearnerExperiment(id: string): boolean;
+	restoreLearnerExperiment(id: string): Promise<boolean>;
+	deleteLearnerExperiment(id: string): Promise<boolean>;
 	getLearnerModel(resource: ICodeScrimWorkspaceResource): ITextModel | null;
 	getInstructorModel(resource: ICodeScrimWorkspaceResource): ITextModel | null;
 	hasLearnerChanges(resource: ICodeScrimWorkspaceResource): boolean;

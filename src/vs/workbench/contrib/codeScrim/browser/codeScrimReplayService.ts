@@ -4,12 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { mainWindow } from '../../../../base/browser/window.js';
-import { Sequencer } from '../../../../base/common/async.js';
+import { RunOnceScheduler, Sequencer } from '../../../../base/common/async.js';
 import { decodeBase64 } from '../../../../base/common/buffer.js';
 import { getErrorMessage, onUnexpectedError } from '../../../../base/common/errors.js';
 import { Emitter } from '../../../../base/common/event.js';
-import { Disposable, DisposableMap, IDisposable, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
-import { Schemas } from '../../../../base/common/network.js';
+import { Disposable, DisposableMap, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { Range } from '../../../../editor/common/core/range.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
@@ -18,6 +17,7 @@ import { IModelService } from '../../../../editor/common/services/model.js';
 import { localize } from '../../../../nls.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
@@ -39,10 +39,10 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	private readonly timer = this._register(new MutableDisposable());
 	private readonly documentsByResource = new Map<string, ICodeScrimDocumentCheckpoint>();
 	private readonly entriesByResource = new Map<string, ICodeScrimWorkspaceEntryCheckpoint>();
+	private readonly learnerCreatedEntries = new Map<string, ICodeScrimWorkspaceEntryCheckpoint>();
 	private readonly urisByResource = new Map<string, URI>();
 	private _state: CodeScrimReplayState = Object.freeze({ status: 'idle' });
 	private activeDraft: ICodeScrimRecordingDraft | undefined;
-	private replayWorkspaceVersion = 0;
 	private startedAt = 0;
 	private ticking = false;
 	private timerTickQueued = false;
@@ -103,6 +103,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		@ILanguageService private readonly languageService: ILanguageService,
 		@IModelService private readonly modelService: IModelService,
 		@INotificationService private readonly notificationService: INotificationService,
+		@ICodeScrimLearnerWorkspaceService private readonly learnerWorkspaceService: ICodeScrimLearnerWorkspaceService,
 	) {
 		super();
 	}
@@ -149,13 +150,26 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	}
 
 	stop(): void {
-		this.captureLearnerExperiment();
+		const stoppedPosition = this._state.status === 'idle' ? 0 : this._state.position;
 		this.operationVersion++;
 		this.timer.clear();
 		this.ticking = false;
 		this._terminalCommands = [];
 		this.terminalReplay.reset();
 		this.publishIdle();
+		void this.operations.queue(async () => {
+			await this.captureLearnerExperiment(stoppedPosition);
+			this.activeDraft = undefined;
+			await this.closeReplayEditors();
+			this.surface?.clear();
+			this.models.clearAndDisposeAll();
+			this.instructorModels.clearAndDisposeAll();
+			this.learnerModelListeners.clearAndDisposeAll();
+			this.documentsByResource.clear();
+			this.entriesByResource.clear();
+			this.urisByResource.clear();
+			await this.learnerWorkspaceService.disposeWorkspace();
+		}).catch(onUnexpectedError);
 	}
 
 	getInstructorModel(resource: ICodeScrimWorkspaceResource): ITextModel | null {
@@ -210,6 +224,153 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		});
 	}
 
+	createLearnerFile(path: string, root?: number): Promise<ICodeScrimWorkspaceResource> {
+		return this.createLearnerEntry(path, 'file', root);
+	}
+
+	createLearnerFolder(path: string, root?: number): Promise<ICodeScrimWorkspaceResource> {
+		return this.createLearnerEntry(path, 'directory', root);
+	}
+
+	deleteLearnerResource(resource: ICodeScrimWorkspaceResource): Promise<boolean> {
+		const operation = ++this.operationVersion;
+		this.timer.clear();
+		return this.operations.queue(async () => {
+			if (!this.isLearnerCreated(resource)) {
+				return false;
+			}
+			if (this._state.status === 'playing') {
+				await this.doPause(operation);
+			}
+
+			const prefix = resource.path ? `${resource.path}/` : '';
+			const deleted: ICodeScrimWorkspaceResource[] = [];
+			for (const [key, entry] of this.learnerCreatedEntries) {
+				if (entry.resource.root === resource.root && (entry.resource.path === resource.path || (prefix && entry.resource.path.startsWith(prefix)))) {
+					deleted.push(entry.resource);
+					this.learnerCreatedEntries.delete(key);
+				}
+			}
+
+			await this.removeResourceTree(resource);
+			await this.learnerWorkspaceService.applyWorkspaceChanges(deleted, []);
+
+			if (this._activeResource && (this._activeResource.root === resource.root && (this._activeResource.path === resource.path || (prefix && this._activeResource.path.startsWith(prefix))))) {
+				const fallback = this.workspaceEntries.find(entry => entry.type === 'file' && entry.text && entry.resource.root === resource.root)
+					?? this.workspaceEntries.find(entry => entry.type === 'file' && entry.text);
+				if (fallback) {
+					await this.showResource(fallback.resource, operation);
+				} else {
+					this._activeResource = undefined;
+					this.replayActiveResource = undefined;
+				}
+			}
+
+			this._onDidChangeWorkspace.fire();
+			return true;
+		});
+	}
+
+	synchronizeLearnerWorkspace(): Promise<void> {
+		const operation = ++this.operationVersion;
+		this.timer.clear();
+		return this.operations.queue(async () => {
+			if (this._state.status === 'idle' || this._state.status === 'preparing' || !this.activeDraft || !this.isCurrentOperation(operation)) {
+				return;
+			}
+			if (this._state.status === 'playing') {
+				await this.doPause(operation);
+			}
+
+			const scannedEntries = await this.learnerWorkspaceService.scanEntries();
+			const scannedByResource = new Map(scannedEntries.map(entry => [CodeScrimRecordingBuffer.resourceKey(entry.resource), entry]));
+			const removedEntries = [...this.learnerCreatedEntries.values()].filter(entry => !scannedByResource.has(CodeScrimRecordingBuffer.resourceKey(entry.resource)));
+			const removedRoots = removedEntries.filter(entry => !removedEntries.some(candidate =>
+				candidate.resource.root === entry.resource.root && entry.resource.path.startsWith(`${candidate.resource.path}/`)));
+			for (const entry of removedRoots) {
+				await this.removeResourceTree(entry.resource);
+			}
+			for (const entry of removedEntries) {
+				this.learnerCreatedEntries.delete(CodeScrimRecordingBuffer.resourceKey(entry.resource));
+			}
+
+			for (const entry of scannedEntries) {
+				const key = CodeScrimRecordingBuffer.resourceKey(entry.resource);
+				if (this.learnerCreatedEntries.has(key)) {
+					this.entriesByResource.set(key, entry);
+					this.learnerCreatedEntries.set(key, entry);
+				} else if (!this.entriesByResource.has(key) && !this.documentsByResource.has(key)) {
+					this.entriesByResource.set(key, entry);
+					this.learnerCreatedEntries.set(key, entry);
+					if (entry.type === 'file' && entry.text) {
+						this.registerResource(entry.resource);
+						this.ensureModel(entry.resource);
+					}
+				}
+			}
+			this._onDidChangeWorkspace.fire();
+		});
+	}
+
+	isLearnerCreated(resource: ICodeScrimWorkspaceResource): boolean {
+		return this.learnerCreatedEntries.has(CodeScrimRecordingBuffer.resourceKey(resource));
+	}
+
+	private createLearnerEntry(path: string, type: 'file' | 'directory', requestedRoot?: number): Promise<ICodeScrimWorkspaceResource> {
+		const operation = ++this.operationVersion;
+		this.timer.clear();
+		return this.operations.queue(async () => {
+			if (this._state.status === 'idle' || this._state.status === 'preparing' || !this.activeDraft || !this.isCurrentOperation(operation)) {
+				throw new Error(localize('codeScrim.learnerWorkspaceUnavailable', "Open a replay before creating learner files."));
+			}
+			if (this._state.status === 'playing') {
+				await this.doPause(operation);
+			}
+
+			const normalizedPath = this.normalizeLearnerPath(path);
+			const root = requestedRoot ?? this._activeResource?.root ?? this.workspaceEntries[0]?.resource.root ?? 0;
+			const resource: ICodeScrimWorkspaceResource = Object.freeze({ root, path: normalizedPath });
+			const key = CodeScrimRecordingBuffer.resourceKey(resource);
+			if (this.entriesByResource.has(key) || this.documentsByResource.has(key)) {
+				throw new Error(localize('codeScrim.learnerEntryExists', "A learner file or folder already exists at {0}.", normalizedPath));
+			}
+
+			const created: ICodeScrimWorkspaceEntryCheckpoint[] = [];
+			const segments = normalizedPath.split('/');
+			for (let index = 1; index < segments.length; index++) {
+				const parentResource = Object.freeze({ root, path: segments.slice(0, index).join('/') });
+				const parentKey = CodeScrimRecordingBuffer.resourceKey(parentResource);
+				const existingParent = this.entriesByResource.get(parentKey);
+				if (existingParent?.type === 'file') {
+					throw new Error(localize('codeScrim.learnerParentIsFile', "Cannot create {0} because one of its parent paths is a file.", normalizedPath));
+				}
+				if (!existingParent) {
+					created.push(Object.freeze({ resource: parentResource, type: 'directory', text: false }));
+				}
+			}
+			created.push(Object.freeze({
+				resource,
+				type,
+				text: type === 'file',
+				size: type === 'file' ? 0 : undefined,
+				contents: type === 'file' ? '' : undefined,
+			}));
+
+			await this.learnerWorkspaceService.applyWorkspaceChanges([], created);
+			for (const entry of created) {
+				const entryKey = CodeScrimRecordingBuffer.resourceKey(entry.resource);
+				this.entriesByResource.set(entryKey, entry);
+				this.learnerCreatedEntries.set(entryKey, entry);
+			}
+			if (type === 'file') {
+				this.registerResource(resource);
+				await this.showResource(resource, operation);
+			}
+			this._onDidChangeWorkspace.fire();
+			return resource;
+		});
+	}
+
 	async openLearnerExperiment(id: string): Promise<void> {
 		const experiment = this._learnerExperiments.find(candidate => candidate.id === id);
 		if (!experiment) {
@@ -220,7 +381,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		await this.operations.queue(() => this.doOpenLearnerExperiment(experiment, operation));
 	}
 
-	restoreLearnerExperiment(id: string): boolean {
+	async restoreLearnerExperiment(id: string): Promise<boolean> {
 		if (this._activeLearnerExperimentId !== id) {
 			return false;
 		}
@@ -237,20 +398,21 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				this.syncLearnerModel(learner, instructor);
 			}
 		}
+		await this.clearLearnerCreatedEntries();
 		this._activeLearnerExperimentId = undefined;
 		this.publishLearnerState();
 		this.publishLearnerExperiments();
 		return true;
 	}
 
-	deleteLearnerExperiment(id: string): boolean {
+	async deleteLearnerExperiment(id: string): Promise<boolean> {
 		const experiment = this._learnerExperiments.find(candidate => candidate.id === id);
 		if (!experiment) {
 			return false;
 		}
 
 		if (this._activeLearnerExperimentId === id) {
-			this.restoreLearnerExperiment(id);
+			await this.restoreLearnerExperiment(id);
 		}
 		this._learnerExperiments = Object.freeze(this._learnerExperiments.filter(candidate => candidate.id !== id));
 		this.publishLearnerExperiments();
@@ -278,6 +440,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 		try {
 			this.learnerOverlays.clear();
+			this.learnerCreatedEntries.clear();
 			this._learnerExperiments = [];
 			this._activeLearnerExperimentId = undefined;
 			this.learnerExperimentSequence = 0;
@@ -294,7 +457,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.activeDraft = draft;
 			this._terminalCommands = collectCodeScrimTerminalCommands(draft.events);
 			this.publish('preparing', 0);
-			this.prepareWorkspace(draft, draft.checkpoints[0]);
+			await this.prepareWorkspace(draft, draft.checkpoints[0]);
 			await this.startPreparedReplay(draft, operation);
 			return this.isCurrentOperation(operation);
 		} catch (error) {
@@ -311,7 +474,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			return false;
 		}
 
-		this.captureLearnerExperiment();
+		await this.captureLearnerExperiment();
 		this.publish('preparing', 0);
 		try {
 			await this.closeReplayEditors();
@@ -322,7 +485,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.models.clearAndDisposeAll();
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
-			this.prepareWorkspace(draft, draft.checkpoints[0]);
+			await this.prepareWorkspace(draft, draft.checkpoints[0]);
 			await this.startPreparedReplay(draft, operation);
 			return this.isCurrentOperation(operation);
 		} catch (error) {
@@ -339,7 +502,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			return;
 		}
 
-		this.captureLearnerExperiment();
+		await this.captureLearnerExperiment();
 		const target = Math.min(draft.duration, Math.max(0, Math.round(position)));
 		const resumeAfterSeek = this._state.status === 'playing';
 		this.publish('preparing', target);
@@ -353,7 +516,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
 			const checkpoint = findCodeScrimCheckpoint(draft.checkpoints, target);
-			this.prepareWorkspace(draft, checkpoint);
+			await this.prepareWorkspace(draft, checkpoint);
 			this.cursor.reset(draft.events, checkpoint.eventIndex, checkpoint.timestamp);
 			const initialResource = this.getInitialResource(draft, checkpoint);
 			if (initialResource) {
@@ -402,7 +565,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			return;
 		}
 
-		this.captureLearnerExperiment();
+		await this.captureLearnerExperiment();
 		const target = Math.min(draft.duration, Math.max(0, experiment.position));
 		this.publish('preparing', target);
 		try {
@@ -416,7 +579,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.learnerModelListeners.clearAndDisposeAll();
 			this.learnerOverlays.clear();
 			const checkpoint = findCodeScrimCheckpoint(draft.checkpoints, target);
-			this.prepareWorkspace(draft, checkpoint);
+			await this.prepareWorkspace(draft, checkpoint);
 			this.cursor.reset(draft.events, checkpoint.eventIndex, checkpoint.timestamp);
 			const initialResource = this.getInitialResource(draft, checkpoint);
 			if (initialResource) {
@@ -431,6 +594,16 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				}
 				await this.applyEvent(event, operation, false);
 			}
+			await this.learnerWorkspaceService.applyWorkspaceChanges([], experiment.createdEntries);
+			for (const entry of experiment.createdEntries) {
+				const key = CodeScrimRecordingBuffer.resourceKey(entry.resource);
+				this.entriesByResource.set(key, entry);
+				this.learnerCreatedEntries.set(key, entry);
+				if (entry.type === 'file' && entry.text) {
+					this.registerResource(entry.resource);
+				}
+			}
+			this._onDidChangeWorkspace.fire();
 
 			for (const change of experiment.changes) {
 				const learner = this.ensureModel(change.resource);
@@ -445,11 +618,14 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 					this.applyingInstructorText = false;
 				}
 				this.learnerOverlays.record(change.resource, change.learnerText, instructor.getValue());
+				if (this.isLearnerCreated(change.resource)) {
+					await this.learnerWorkspaceService.writeText(change.resource, change.learnerText);
+				}
 			}
 			this._activeLearnerExperimentId = experiment.id;
 			this.publishLearnerState();
 			this.publishLearnerExperiments();
-			const firstChange = experiment.changes[0];
+			const firstChange = experiment.changes[0] ?? experiment.createdEntries.find(entry => entry.type === 'file');
 			if (firstChange) {
 				await this.showResource(firstChange.resource, operation);
 			}
@@ -469,7 +645,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		if (this._state.status !== 'paused' || !this.isCurrentOperation(operation)) {
 			return;
 		}
-		this.captureLearnerExperiment();
+		await this.captureLearnerExperiment();
 
 		if (this.replayActiveResource) {
 			await this.showResource(this.replayActiveResource, operation);
@@ -482,11 +658,11 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this.startTimer(operation);
 	}
 
-	private prepareWorkspace(draft: ICodeScrimRecordingDraft, checkpoint: ICodeScrimRecordingCheckpoint): void {
+	private async prepareWorkspace(draft: ICodeScrimRecordingDraft, checkpoint: ICodeScrimRecordingCheckpoint): Promise<void> {
+		await this.learnerWorkspaceService.reset(draft, checkpoint);
 		this.documentsByResource.clear();
 		this.entriesByResource.clear();
 		this.urisByResource.clear();
-		this.replayWorkspaceVersion++;
 		this._activeResource = undefined;
 		this.replayActiveResource = undefined;
 		this.pendingActiveResource = undefined;
@@ -497,12 +673,12 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			const key = CodeScrimRecordingBuffer.resourceKey(entry.resource);
 			this.entriesByResource.set(key, entry);
 			if (entry.type === 'file' && entry.text) {
-				this.registerResource(draft.id, entry.resource);
+				this.registerResource(entry.resource);
 			}
 		}
 		for (const document of checkpoint.documents) {
 			this.documentsByResource.set(CodeScrimRecordingBuffer.resourceKey(document.resource), document);
-			this.registerResource(draft.id, document.resource);
+			this.registerResource(document.resource);
 		}
 		this._onDidChangeWorkspace.fire();
 	}
@@ -633,9 +809,15 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				this.surface?.applySelections(event.payload.resource, event.payload.selections);
 				break;
 			}
-			case 'editor.documentSaved':
-				// Saves are presentation markers during passive replay. Instructor code is never written to disk here.
+			case 'editor.documentSaved': {
+				// A recorded save updates only the CodeScrim-owned learner projection. It never writes
+				// to the instructor workspace and never executes a task or command.
+				const instructorModel = this.getInstructorModelInternal(event.payload.resource);
+				if (instructorModel) {
+					await this.learnerWorkspaceService.writeText(event.payload.resource, instructorModel.getValue());
+				}
 				break;
+			}
 			default:
 				this.terminalReplay.apply(event);
 				break;
@@ -729,14 +911,20 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		}
 		this.instructorModels.set(key, instructorModel);
 		this.models.set(key, model);
-		this.learnerModelListeners.set(key, model.onDidChangeContent(() => {
+		const modelListeners = new DisposableStore();
+		const persistLearnerText = modelListeners.add(new RunOnceScheduler(() => {
+			void this.learnerWorkspaceService.writeText(resource, model.getValue()).catch(onUnexpectedError);
+		}, 100));
+		modelListeners.add(model.onDidChangeContent(() => {
 			if (this.applyingInstructorText) {
 				return;
 			}
 			this.beginLearnerEdit();
 			this.learnerOverlays.record(resource, model.getValue(), instructorModel.getValue());
+			persistLearnerText.schedule();
 			this.publishLearnerState();
 		}));
+		this.learnerModelListeners.set(key, modelListeners);
 		return model;
 	}
 
@@ -758,11 +946,14 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this._onDidChangeLearnerExperiments.fire(this._learnerExperiments);
 	}
 
-	private captureLearnerExperiment(): void {
+	private async captureLearnerExperiment(position = this._state.status === 'idle' ? 0 : this._state.position): Promise<void> {
 		if (!this.activeDraft) {
 			return;
 		}
 		const changes = this.learnerOverlays.state.changedResources.flatMap(resource => {
+			if (this.isLearnerCreated(resource)) {
+				return [];
+			}
 			const learner = this.getModel(resource);
 			const instructor = this.getInstructorModelInternal(resource);
 			return learner && instructor ? [{
@@ -771,7 +962,23 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				instructorText: instructor.getValue(),
 			}] : [];
 		});
-		if (!changes.length) {
+		const createdEntries = [...this.learnerCreatedEntries.values()].map(entry => Object.freeze({
+			...entry,
+			contents: entry.type === 'file' ? '' : undefined,
+			size: entry.type === 'file' ? 0 : undefined,
+		}));
+		for (const entry of createdEntries) {
+			if (entry.type !== 'file') {
+				continue;
+			}
+			const learner = this.getModel(entry.resource);
+			changes.push(Object.freeze({
+				resource: entry.resource,
+				learnerText: learner?.getValue() ?? '',
+				instructorText: '',
+			}));
+		}
+		if (!changes.length && !createdEntries.length) {
 			this._activeLearnerExperimentId = undefined;
 			return;
 		}
@@ -780,15 +987,20 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			: undefined;
 		const unchangedLoadedExperiment = activeExperiment
 			&& activeExperiment.changes.length === changes.length
+			&& activeExperiment.createdEntries.length === createdEntries.length
 			&& activeExperiment.changes.every(change => changes.some(candidate =>
 				CodeScrimRecordingBuffer.resourceKey(candidate.resource) === CodeScrimRecordingBuffer.resourceKey(change.resource)
-				&& candidate.learnerText === change.learnerText));
+				&& candidate.learnerText === change.learnerText))
+			&& activeExperiment.createdEntries.every(entry => createdEntries.some(candidate =>
+				CodeScrimRecordingBuffer.resourceKey(candidate.resource) === CodeScrimRecordingBuffer.resourceKey(entry.resource)
+				&& candidate.type === entry.type));
 
 		if (!unchangedLoadedExperiment) {
 			const experiment: ICodeScrimLearnerExperiment = Object.freeze({
 				id: `${this.activeDraft.id}:experiment:${++this.learnerExperimentSequence}`,
-				position: this._state.status === 'idle' ? 0 : this._state.position,
+				position,
 				changes: Object.freeze(changes),
+				createdEntries: Object.freeze(createdEntries),
 			});
 			this._learnerExperiments = Object.freeze([...this._learnerExperiments, experiment]);
 		}
@@ -801,8 +1013,32 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			}
 		}
 		this.learnerOverlays.clear();
+		await this.clearLearnerCreatedEntries();
 		this.publishLearnerState();
 		this.publishLearnerExperiments();
+	}
+
+	private async clearLearnerCreatedEntries(): Promise<void> {
+		const entries = [...this.learnerCreatedEntries.values()];
+		if (!entries.length) {
+			return;
+		}
+		const topLevel = entries.filter(entry => !entries.some(candidate =>
+			candidate.resource.root === entry.resource.root && entry.resource.path.startsWith(`${candidate.resource.path}/`)));
+		for (const entry of topLevel) {
+			await this.removeResourceTree(entry.resource);
+		}
+		await this.learnerWorkspaceService.applyWorkspaceChanges(topLevel.map(entry => entry.resource), []);
+		this.learnerCreatedEntries.clear();
+		this._onDidChangeWorkspace.fire();
+	}
+
+	private normalizeLearnerPath(path: string): string {
+		const normalized = path.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+		if (!normalized || normalized.split('/').some(segment => !segment || segment === '.' || segment === '..')) {
+			throw new Error(localize('codeScrim.invalidLearnerPath', "Enter a relative path without empty, dot, or parent segments."));
+		}
+		return normalized;
 	}
 
 	private reconcileLearnerOverlays(): void {
@@ -823,6 +1059,10 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				return;
 			}
 		}
+		await this.learnerWorkspaceService.applyWorkspaceChanges(deleted, created);
+		if (!this.isCurrentOperation(operation)) {
+			return;
+		}
 
 		const draft = this.activeDraft;
 		if (!draft) {
@@ -834,7 +1074,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			if (entry.type !== 'file' || !entry.text || entry.contents === undefined) {
 				continue;
 			}
-			this.registerResource(draft.id, entry.resource);
+			this.registerResource(entry.resource);
 			const model = this.getModel(entry.resource);
 			const instructorModel = this.getInstructorModelInternal(entry.resource);
 			if (model && instructorModel) {
@@ -892,13 +1132,15 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		}
 	}
 
-	private registerResource(draftId: string, resource: ICodeScrimWorkspaceResource): void {
+	private registerResource(resource: ICodeScrimWorkspaceResource): void {
 		const key = CodeScrimRecordingBuffer.resourceKey(resource);
 		if (this.urisByResource.has(key)) {
 			return;
 		}
-		const uri = this.toReplayUri(draftId, resource);
-		this.urisByResource.set(key, uri);
+		const uri = this.learnerWorkspaceService.toLearnerUri(resource);
+		if (uri) {
+			this.urisByResource.set(key, uri);
+		}
 	}
 
 	private async closeReplayEditors(): Promise<void> {
@@ -910,17 +1152,6 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 	private getUri(resource: ICodeScrimWorkspaceResource): URI | undefined {
 		return this.urisByResource.get(CodeScrimRecordingBuffer.resourceKey(resource));
-	}
-
-	private toReplayUri(draftId: string, resource: ICodeScrimWorkspaceResource): URI {
-		return URI.from({
-			// Untitled is VS Code's generic editable-document contract. It gives every
-			// installed language provider its normal opt-in path without writing to disk.
-			scheme: Schemas.untitled,
-			authority: draftId,
-			path: `/codescrim/${resource.root}/${resource.path}`,
-			query: `workspace=${this.replayWorkspaceVersion}`,
-		});
 	}
 
 	private publish(status: 'preparing' | 'playing' | 'paused' | 'ended', position: number): void {

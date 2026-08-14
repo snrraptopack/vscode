@@ -35,10 +35,11 @@ import { IThemeService } from '../../../../platform/theme/common/themeService.js
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { IEditorOpenContext } from '../../../common/editor.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
-import { CodeScrimRecordingBuffer, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
+import { CodeScrimRecordingBuffer, ICodeScrimSelection, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
 import { CodeScrimLessonEditorInput } from './codeScrimLessonEditorInput.js';
+import { CodeScrimLearnerFilesTree } from './codeScrimLearnerFilesTree.js';
 import { CodeScrimTerminalSurface } from './codeScrimTerminalSurface.js';
 import { CodeScrimTerminalTimeline } from './codeScrimTerminalTimeline.js';
 
@@ -56,7 +57,10 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private navigation: HTMLElement | undefined;
 	private coursePane: HTMLElement | undefined;
 	private filesPane: HTMLElement | undefined;
-	private filesTree: HTMLElement | undefined;
+	private filesTreeHost: HTMLElement | undefined;
+	private learnerFilesTree: CodeScrimLearnerFilesTree | undefined;
+	private newFileButton: HTMLButtonElement | undefined;
+	private newFolderButton: HTMLButtonElement | undefined;
 	private courseModeButton: HTMLButtonElement | undefined;
 	private filesModeButton: HTMLButtonElement | undefined;
 	private courseProgress: HTMLElement | undefined;
@@ -81,7 +85,6 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private transcriptPanel: HTMLElement | undefined;
 	private notesPanel: HTMLElement | undefined;
 	private readonly transcriptEntries: ITranscriptEntry[] = [];
-	private readonly workspaceTreeListeners = this._register(new DisposableStore());
 	private readonly replayTabListeners = this._register(new DisposableStore());
 	private readonly timelineMarkerListeners = this._register(new DisposableStore());
 	private readonly experimentPopoverListeners = this._register(new DisposableStore());
@@ -113,10 +116,9 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		super(CodeScrimLessonEditor.ID, group, telemetryService, themeService, storageService);
 		this._register(this.sessionService.onDidChangeState(state => this.renderState(state)));
 		this._register(this.replayService.onDidChangeState(state => this.renderReplayState(state)));
-		this._register(this.replayService.onDidChangeWorkspace(() => this.renderWorkspaceTree()));
+		this._register(this.replayService.onDidChangeWorkspace(() => void this.learnerFilesTree?.refresh()));
 		this._register(this.replayService.onDidChangeLearnerState(() => {
 			this.renderReplayTabs();
-			this.renderWorkspaceTree();
 		}));
 		this._register(this.replayService.onDidChangeLearnerExperiments(() => {
 			if (this.selectedExperimentId && this.replayService.activeLearnerExperimentId !== this.selectedExperimentId) {
@@ -199,7 +201,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			this.selectNavigationMode('files', false);
 		}
 		this.renderReplayTabs(resource);
-		this.renderWorkspaceTree(resource);
+		this.renderWorkspaceTree();
 	}
 
 	applySelections(resource: ICodeScrimWorkspaceResource, selections: readonly ICodeScrimSelection[]): void {
@@ -282,8 +284,25 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.filesPane.hidden = true;
 		const filesHeader = DOM.append(this.filesPane, DOM.$('.codescrim-session-files-header'));
 		DOM.append(filesHeader, DOM.$('span', undefined, localize('codeScrim.replayFilesTitle', "Replay workspace")));
-		this.filesTree = DOM.append(this.filesPane, DOM.$('.codescrim-session-files-tree.file-icon-themable-tree.show-file-icons', { role: 'tree' }));
-		this.renderWorkspaceTree();
+		const fileActions = DOM.append(filesHeader, DOM.$('.codescrim-session-files-actions'));
+		this.newFileButton = this.createIconButton(
+			fileActions,
+			'codescrim-session-files-action',
+			localize('codeScrim.newLearnerFile', "New File"),
+			Codicon.newFile,
+			() => void this.learnerFilesTree?.create('file'),
+		);
+		this.newFolderButton = this.createIconButton(
+			fileActions,
+			'codescrim-session-files-action',
+			localize('codeScrim.newLearnerFolder', "New Folder"),
+			Codicon.newFolder,
+			() => void this.learnerFilesTree?.create('directory'),
+		);
+		this.filesTreeHost = DOM.append(this.filesPane, DOM.$('.codescrim-session-files-tree'));
+		this.learnerFilesTree = this._register(this.instantiationService.createInstance(CodeScrimLearnerFilesTree, this.filesTreeHost));
+		void this.learnerFilesTree.refresh();
+		this.updateFileCreationActions(this.replayService.state);
 
 		const navigationFooter = DOM.append(navigation, DOM.$('.codescrim-session-navigation-footer'));
 		this.courseProgress = DOM.append(navigationFooter, DOM.$('.codescrim-session-course-progress-footer'));
@@ -479,7 +498,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}
 		for (const experiment of this.replayService.learnerExperiments) {
 			const time = this.formatTime(experiment.position / 1000);
-			const label = localize('codeScrim.learnerExperimentMarkerLabel', "Learner experiment at {0}; {1} changed files", time, experiment.changes.length);
+			const label = localize('codeScrim.learnerExperimentMarkerLabel', "Learner experiment at {0}; {1} changed files", time, this.experimentResourceCount(experiment));
 			const marker = DOM.append(this.timelineMarkers, DOM.$('button.codescrim-session-timeline-marker', {
 				type: 'button',
 				title: label,
@@ -493,6 +512,13 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 				void this.selectLearnerExperiment(experiment.id);
 			}));
 		}
+	}
+
+	private experimentResourceCount(experiment: ICodeScrimLearnerExperiment): number {
+		return new Set([
+			...experiment.changes.map(change => CodeScrimRecordingBuffer.resourceKey(change.resource)),
+			...experiment.createdEntries.map(entry => CodeScrimRecordingBuffer.resourceKey(entry.resource)),
+		]).size;
 	}
 
 	private async selectLearnerExperiment(id: string): Promise<void> {
@@ -522,9 +548,10 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			return;
 		}
 
-		const summary = experiment.changes.length === 1
+		const resourceCount = this.experimentResourceCount(experiment);
+		const summary = resourceCount === 1
 			? localize('codeScrim.experimentSummaryOneFile', "Experiment · {0} · 1 file", this.formatTime(experiment.position / 1000))
-			: localize('codeScrim.experimentSummaryManyFiles', "Experiment · {0} · {1} files", this.formatTime(experiment.position / 1000), experiment.changes.length);
+			: localize('codeScrim.experimentSummaryManyFiles', "Experiment · {0} · {1} files", this.formatTime(experiment.position / 1000), resourceCount);
 		const label = DOM.append(this.experimentPopover, DOM.$('.codescrim-session-experiment-summary'));
 		label.appendChild(renderIcon(Codicon.gitBranch));
 		DOM.append(label, DOM.$('span', undefined, summary));
@@ -534,6 +561,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}, this.reviewingExperimentId === experiment.id
 			? localize('codeScrim.closeExperimentReview', "Close Review")
 			: localize('codeScrim.reviewExperimentChanges', "Review Changes"))) as HTMLButtonElement;
+		reviewButton.disabled = experiment.changes.length === 0;
 		this.experimentPopoverListeners.add(DOM.addDisposableListener(reviewButton, DOM.EventType.CLICK, () => {
 			if (this.reviewingExperimentId === experiment.id) {
 				this.closeExperimentReview();
@@ -572,9 +600,9 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 				tooltip: '',
 				class: undefined,
 				enabled: true,
-				run: () => {
+				run: async () => {
 					this.closeExperimentReview();
-					this.replayService.restoreLearnerExperiment(experiment.id);
+					await this.replayService.restoreLearnerExperiment(experiment.id);
 				},
 			}, {
 				id: 'codescrim.keepLearnerExperiment',
@@ -589,9 +617,9 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 				tooltip: '',
 				class: undefined,
 				enabled: true,
-				run: () => {
+				run: async () => {
 					this.dismissExperimentPopover();
-					this.replayService.deleteLearnerExperiment(experiment.id);
+					await this.replayService.deleteLearnerExperiment(experiment.id);
 				},
 			}],
 		});
@@ -611,7 +639,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.diffEditorHost.hidden = false;
 		this.diffEditor.setModel({ original: instructor, modified: learner });
 		this.renderReplayTabs(resource);
-		this.renderWorkspaceTree(resource);
+		this.renderWorkspaceTree();
 		mainWindow.requestAnimationFrame(() => this.layoutCodeEditor());
 	}
 
@@ -759,23 +787,20 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}
 		this.courseModeButton?.setAttribute('aria-selected', String(courseSelected));
 		this.filesModeButton?.setAttribute('aria-selected', String(!courseSelected));
+		mainWindow.requestAnimationFrame(() => this.layoutCodeEditor());
 	}
 
-	private renderWorkspaceTree(activeResource = this.replayService.activeResource): void {
-		if (!this.filesTree) {
-			return;
-		}
+	private renderWorkspaceTree(): void {
+		void this.learnerFilesTree?.refresh();
+	}
 
-		DOM.clearNode(this.filesTree);
-		this.workspaceTreeListeners.clear();
-		const entries = this.replayService.workspaceEntries;
-		if (!entries.length) {
-			DOM.append(this.filesTree, DOM.$('p.codescrim-session-files-empty', undefined, localize('codeScrim.noReplayFiles', "Files appear here when a replay is loaded.")));
-			return;
+	private updateFileCreationActions(state: CodeScrimReplayState): void {
+		const disabled = state.status === 'idle' || state.status === 'preparing';
+		if (this.newFileButton) {
+			this.newFileButton.disabled = disabled;
 		}
-
-		for (const entry of entries) {
-			this.renderWorkspaceEntry(this.filesTree, entry, activeResource);
+		if (this.newFolderButton) {
+			this.newFolderButton.disabled = disabled;
 		}
 	}
 
@@ -830,28 +855,6 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.renderReplayTabs();
 	}
 
-	private renderWorkspaceEntry(parent: HTMLElement, entry: ICodeScrimWorkspaceEntryCheckpoint, activeResource: ICodeScrimWorkspaceResource | undefined): void {
-		const depth = entry.resource.path.split('/').length;
-		const label = entry.resource.path.split('/').pop() || localize('codeScrim.workspaceRoot', "Workspace");
-		const item = DOM.append(parent, DOM.$('button.codescrim-session-file', {
-			type: 'button',
-			role: 'treeitem',
-			'aria-level': String(depth),
-			'aria-label': entry.resource.path,
-			title: entry.resource.path,
-		})) as HTMLButtonElement;
-		item.style.paddingLeft = `${10 + (depth - 1) * 14}px`;
-		item.classList.toggle('active', !!activeResource && CodeScrimRecordingBuffer.resourceKey(activeResource) === CodeScrimRecordingBuffer.resourceKey(entry.resource));
-		item.classList.toggle('learner-modified', entry.type === 'file' && this.replayService.hasLearnerChanges(entry.resource));
-		this.appendResourceIcon(item, entry.resource, entry.type);
-		DOM.append(item, DOM.$('span', undefined, label));
-		if (entry.type === 'directory' || !entry.text) {
-			item.disabled = true;
-		} else {
-			this.workspaceTreeListeners.add(DOM.addDisposableListener(item, DOM.EventType.CLICK, () => this.openWorkspaceResource(entry.resource)));
-		}
-	}
-
 	private openWorkspaceResource(resource: ICodeScrimWorkspaceResource): void {
 		const experiment = this.reviewingExperimentId
 			? this.replayService.learnerExperiments.find(candidate => candidate.id === this.reviewingExperimentId)
@@ -901,6 +904,9 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	}
 
 	private layoutCodeEditor(): void {
+		if (this.filesTreeHost && this.learnerFilesTree) {
+			this.learnerFilesTree.layout(this.filesTreeHost.clientHeight, this.filesTreeHost.clientWidth);
+		}
 		if (this.editorHost && this.codeEditor) {
 			this.codeEditor.layout(new DOM.Dimension(this.editorHost.clientWidth, this.editorHost.clientHeight));
 		}
@@ -973,6 +979,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	}
 
 	private renderReplayState(state: CodeScrimReplayState): void {
+		this.updateFileCreationActions(state);
 		if (state.status === 'idle') {
 			this.renderState(this.sessionService.state);
 			return;
