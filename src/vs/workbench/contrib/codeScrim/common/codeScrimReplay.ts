@@ -8,12 +8,59 @@ import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
-import { ICodeScrimTerminalState } from './codeScrimTerminal.js';
+import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalCommandCluster, ICodeScrimTerminalState } from './codeScrimTerminal.js';
 
 export const CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID = 'codescrim.replayLastRecording';
 export const CODE_SCRIM_RESTART_REPLAY_COMMAND_ID = 'codescrim.restartReplay';
 export const CODE_SCRIM_RESUME_REPLAY_COMMAND_ID = 'codescrim.resumeReplay';
 export const CODE_SCRIM_STOP_REPLAY_COMMAND_ID = 'codescrim.stopReplay';
+
+export function collectCodeScrimTerminalCommands(events: readonly CodeScrimRecordingEvent[]): readonly ICodeScrimTerminalCommandActivity[] {
+	const commands: ICodeScrimTerminalCommandActivity[] = [];
+	const commandIndexes = new Map<string, number>();
+	for (const event of events) {
+		if (event.kind === 'terminal.commandStarted') {
+			commandIndexes.set(event.payload.commandId, commands.length);
+			commands.push(Object.freeze({
+				...event.payload,
+				startedAt: event.timestamp,
+			}));
+		} else if (event.kind === 'terminal.commandFinished') {
+			const index = commandIndexes.get(event.payload.commandId);
+			const command = index === undefined ? undefined : commands[index];
+			if (command && command.terminalId === event.payload.terminalId) {
+				commands[index] = Object.freeze({
+					...command,
+					...(event.payload.cwd === undefined ? {} : { cwd: event.payload.cwd }),
+					finishedAt: event.timestamp,
+					...(event.payload.exitCode === undefined ? {} : { exitCode: event.payload.exitCode }),
+				});
+			}
+		}
+	}
+	return Object.freeze(commands);
+}
+
+export function clusterCodeScrimTerminalCommands(commands: readonly ICodeScrimTerminalCommandActivity[], duration: number): readonly ICodeScrimTerminalCommandCluster[] {
+	const threshold = Math.min(5_000_000, Math.max(1_000_000, Math.round(duration * 0.01)));
+	const clusters: { position: number; commands: ICodeScrimTerminalCommandActivity[] }[] = [];
+	for (const command of commands) {
+		if (!command.command.trim()) {
+			continue;
+		}
+		const previous = clusters.at(-1);
+		const previousCommand = previous?.commands.at(-1);
+		if (previous && previousCommand && command.startedAt - previousCommand.startedAt <= threshold) {
+			previous.commands.push(command);
+		} else {
+			clusters.push({ position: command.startedAt, commands: [command] });
+		}
+	}
+	return Object.freeze(clusters.map(cluster => Object.freeze({
+		position: cluster.position,
+		commands: Object.freeze(cluster.commands),
+	})));
+}
 
 export function findCodeScrimCheckpoint(checkpoints: readonly ICodeScrimRecordingCheckpoint[], target: number): ICodeScrimRecordingCheckpoint {
 	let low = 0;
@@ -238,6 +285,7 @@ export interface ICodeScrimReplayService {
 	readonly learnerExperiments: readonly ICodeScrimLearnerExperiment[];
 	readonly activeLearnerExperimentId: string | undefined;
 	readonly terminalState: ICodeScrimTerminalState;
+	readonly terminalCommands: readonly ICodeScrimTerminalCommandActivity[];
 	readonly onDidChangeState: Event<CodeScrimReplayState>;
 	readonly onDidChangeWorkspace: Event<void>;
 	readonly onDidChangeLearnerState: Event<ICodeScrimLearnerState>;

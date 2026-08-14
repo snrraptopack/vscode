@@ -86,6 +86,25 @@ export class CodeScrimTerminalSurface extends Disposable {
 		}
 	}
 
+	/** Reveal one recorded terminal without forwarding input to its replay PTY. */
+	async revealTerminal(terminalId: number): Promise<void> {
+		this.dismissed.delete(terminalId);
+		let terminal = this.terminals.get(terminalId);
+		if (!terminal) {
+			const recorded = this.latest.get(terminalId) ?? this.replayService.terminalState.terminals.find(candidate => candidate.terminalId === terminalId);
+			if (recorded && !this.pending.has(terminalId)) {
+				const creation = this.createTerminal(recorded).finally(() => this.pending.delete(terminalId));
+				this.pending.set(terminalId, creation);
+			}
+			await this.pending.get(terminalId);
+			terminal = this.terminals.get(terminalId);
+		}
+		if (terminal) {
+			this.terminalService.setActiveInstance(terminal.instance);
+			await this.terminalService.revealActiveTerminal(true);
+		}
+	}
+
 	private async createTerminal(recorded: ICodeScrimTerminalCheckpoint): Promise<void> {
 		const terminalEntryRef: { value?: ICodeScrimNativeTerminal } = {};
 		let replayPty: CodeScrimReplayPty | undefined;

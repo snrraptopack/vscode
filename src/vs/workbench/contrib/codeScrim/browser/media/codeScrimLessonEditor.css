@@ -594,6 +594,122 @@
 	display: none;
 }
 
+.codescrim-session-terminal-popover {
+	position: absolute;
+	right: 0;
+	bottom: 42px;
+	z-index: 9;
+	display: flex;
+	box-sizing: border-box;
+	width: min(440px, 80vw);
+	max-height: 240px;
+	padding: var(--vscode-spacing-size80);
+	flex-direction: column;
+	gap: var(--vscode-spacing-size60);
+	border: var(--vscode-strokeThickness) solid var(--vscode-widget-border);
+	border-radius: var(--vscode-cornerRadius-large);
+	background: var(--vscode-editorWidget-background);
+	box-shadow: 0 4px 16px var(--vscode-widget-shadow);
+}
+
+.codescrim-session-terminal-popover[hidden] {
+	display: none;
+}
+
+.codescrim-session-terminal-popover-header,
+.codescrim-session-terminal-popover-title {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+}
+
+.codescrim-session-terminal-popover-header {
+	justify-content: space-between;
+	gap: var(--vscode-spacing-size80);
+}
+
+.codescrim-session-terminal-popover-title {
+	overflow: hidden;
+	gap: var(--vscode-spacing-size80);
+	font-size: var(--vscode-fontSize-body2);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.codescrim-session-terminal-popover-title span:last-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.codescrim-session-terminal-popover-close {
+	display: grid;
+	width: var(--vscode-spacing-size280);
+	height: var(--vscode-spacing-size280);
+	padding: 0;
+	place-items: center;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-editorWidget-foreground);
+	cursor: pointer;
+}
+
+.codescrim-session-terminal-popover-close:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.codescrim-session-terminal-command-list {
+	display: grid;
+	min-height: 0;
+	overflow: auto;
+	gap: var(--vscode-spacing-size20);
+}
+
+.codescrim-session-terminal-command {
+	display: grid;
+	min-width: 0;
+	min-height: var(--vscode-spacing-size320);
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size80);
+	align-items: center;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: var(--vscode-spacing-size120);
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-editorWidget-foreground);
+	font-family: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.codescrim-session-terminal-command:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.codescrim-session-terminal-command:focus-visible,
+.codescrim-session-terminal-popover-close:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
+	outline-offset: calc(-1 * var(--vscode-strokeThickness));
+}
+
+.codescrim-session-terminal-command code {
+	overflow: hidden;
+	font-family: var(--monaco-monospace-font);
+	font-size: var(--vscode-fontSize-label1);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.codescrim-session-terminal-command span,
+.codescrim-session-terminal-command-more {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label3);
+}
+
+.codescrim-session-terminal-command-more {
+	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size80);
+}
+
 .codescrim-session-experiment-summary {
 	display: flex;
 	min-width: 0;
@@ -660,6 +776,48 @@
 	left: 7px;
 	z-index: 2;
 	pointer-events: none;
+}
+
+.codescrim-session-terminal-markers {
+	position: absolute;
+	top: 0;
+	right: 7px;
+	bottom: 0;
+	left: 7px;
+	z-index: 2;
+	pointer-events: none;
+}
+
+.codescrim-session-terminal-marker {
+	position: absolute;
+	top: 50%;
+	box-sizing: border-box;
+	width: var(--vscode-spacing-size80);
+	height: var(--vscode-spacing-size160);
+	padding: 0;
+	transform: translate(-50%, -50%);
+	border: var(--vscode-strokeThickness) solid var(--vscode-editorWidget-background);
+	border-radius: var(--vscode-cornerRadius-xSmall);
+	background: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	opacity: 0.85;
+	pointer-events: auto;
+}
+
+.codescrim-session-terminal-marker.cluster {
+	width: var(--vscode-spacing-size120);
+}
+
+.codescrim-session-terminal-marker:hover,
+.codescrim-session-terminal-marker:focus-visible,
+.codescrim-session-terminal-marker.active {
+	background: var(--vscode-terminal-ansiCyan);
+	opacity: 1;
+}
+
+.codescrim-session-terminal-marker:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
+	outline-offset: var(--vscode-spacing-size20);
 }
 
 .codescrim-session-timeline-marker {

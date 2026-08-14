@@ -156,6 +156,12 @@ export interface ICodeScrimLayoutService {
 	readonly _serviceBrand: undefined;
 
 	/**
+	 * Restores a learner layout lease that survived a window shutdown. This is called once after
+	 * workbench restoration, before the author starts another CodeScrim session.
+	 */
+	restoreStaleCodeScrimLayout(): void;
+
+	/**
 	 * Enters the focused CodeScrim product shell and restores the previous workbench layout when
 	 * the returned handle is disposed. Multiple visible CodeScrim panes share one layout lease.
 	 */

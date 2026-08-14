@@ -104,7 +104,7 @@ Acceptance criteria:
 
 - [x] Capture terminal lifecycle, input, raw output, working directories, dimensions, title, and exit state.
 - [x] Replay and seek recorded terminal presentation through the native integrated Terminal panel and a read-only replay PTY without executing commands.
-- Add shell-integration command boundaries and terminal switching controls.
+- [x] Add shell-integration command boundaries, deterministic multi-terminal switching, and progressively disclosed terminal activity markers.
 - Provide a real learner terminal rooted in the learner workspace.
 - Capture debug lifecycle, breakpoints, focus, stack, variables, REPL, and relevant errors.
 - Define runnable checkpoints for exercises that require live debug state.

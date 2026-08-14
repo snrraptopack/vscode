@@ -14,7 +14,7 @@ export const CODE_SCRIM_OPEN_RECORDING_COMMAND_ID = 'codescrim.openRecording';
 export const CODE_SCRIM_PACKAGE_EXTENSION = 'scrim';
 
 const PACKAGE_MAGIC = new Uint8Array([0x43, 0x4f, 0x44, 0x45, 0x53, 0x43, 0x52, 0x4d]); // CODESCRM
-const PACKAGE_MAJOR_VERSION = 3;
+const PACKAGE_MAJOR_VERSION = 4;
 const PACKAGE_MINOR_VERSION = 0;
 const PACKAGE_HEADER_LENGTH_BYTES = 4;
 const PACKAGE_MAX_HEADER_BYTES = 16 * 1024;
@@ -74,7 +74,7 @@ interface ICodeScrimPackagedCheckpoint {
 interface ICodeScrimPackagePayload {
 	readonly manifest: {
 		readonly format: 'codescrim-session';
-		readonly schemaVersion: 3;
+		readonly schemaVersion: 4;
 		readonly sessionId: string;
 		readonly duration: number;
 		readonly timebase: 'microseconds';
@@ -235,7 +235,7 @@ export class CodeScrimPackageCodec {
 		return {
 			manifest: {
 				format: 'codescrim-session',
-				schemaVersion: 3,
+				schemaVersion: 4,
 				sessionId: draft.id,
 				duration: draft.duration,
 				timebase: 'microseconds',
@@ -384,7 +384,7 @@ function parseHeader(candidate: unknown): ICodeScrimPackageHeader {
 
 function parsePayload(candidate: unknown): ICodeScrimPackagePayload {
 	if (!isRecord(candidate) || !isRecord(candidate.manifest) || candidate.manifest.format !== 'codescrim-session' ||
-		candidate.manifest.schemaVersion !== 3 || typeof candidate.manifest.sessionId !== 'string' || !candidate.manifest.sessionId ||
+		candidate.manifest.schemaVersion !== 4 || typeof candidate.manifest.sessionId !== 'string' || !candidate.manifest.sessionId ||
 		!isSafeInteger(candidate.manifest.duration) || candidate.manifest.duration < 0 || candidate.manifest.timebase !== 'microseconds' ||
 		!isSafeInteger(candidate.manifest.eventCount) || candidate.manifest.eventCount < 0 || candidate.manifest.eventCount > PACKAGE_MAX_EVENT_COUNT ||
 		!Array.isArray(candidate.manifest.checkpoints) || !candidate.manifest.checkpoints.length || candidate.manifest.checkpoints.length > PACKAGE_MAX_CHECKPOINT_COUNT ||
@@ -539,6 +539,22 @@ function validateEventPayload(event: CodeScrimRecordingEvent): void {
 				throw new Error('The CodeScrim terminal data event is invalid.');
 			}
 			return;
+		case 'terminal.commandStarted':
+			if (!isTerminalId(event.payload.terminalId) || typeof event.payload.terminalTitle !== 'string' ||
+				!isNonEmptyString(event.payload.commandId) || !isNonEmptyString(event.payload.command) ||
+				(event.payload.cwd !== undefined && typeof event.payload.cwd !== 'string') ||
+				(event.payload.commandLineConfidence !== 'low' && event.payload.commandLineConfidence !== 'medium' && event.payload.commandLineConfidence !== 'high') ||
+				typeof event.payload.isTrusted !== 'boolean') {
+				throw new Error('The CodeScrim terminal command-start event is invalid.');
+			}
+			return;
+		case 'terminal.commandFinished':
+			if (!isTerminalId(event.payload.terminalId) || !isNonEmptyString(event.payload.commandId) ||
+				(event.payload.cwd !== undefined && typeof event.payload.cwd !== 'string') ||
+				(event.payload.exitCode !== undefined && !isSafeInteger(event.payload.exitCode))) {
+				throw new Error('The CodeScrim terminal command-finish event is invalid.');
+			}
+			return;
 		case 'terminal.dimensionsChanged':
 			if (!isTerminalId(event.payload.terminalId) || !isTerminalDimension(event.payload.cols) || !isTerminalDimension(event.payload.rows)) {
 				throw new Error('The CodeScrim terminal-dimensions event is invalid.');
@@ -596,6 +612,10 @@ function isSafeInteger(candidate: unknown): candidate is number {
 
 function isPositiveInteger(candidate: unknown): candidate is number {
 	return isSafeInteger(candidate) && candidate > 0;
+}
+
+function isNonEmptyString(candidate: unknown): candidate is string {
+	return typeof candidate === 'string' && candidate.length > 0;
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {

@@ -25,7 +25,7 @@ suite('CodeScrimPackageCodec', () => {
 			decoded,
 			plaintextVisible: encoded.toString().includes('private source text'),
 		}, {
-			header: { packageId: 'package-test', keyId: 'author-key', major: 3, minor: 0 },
+			header: { packageId: 'package-test', keyId: 'author-key', major: 4, minor: 0 },
 			decoded: draft,
 			plaintextVisible: false,
 		});
@@ -92,7 +92,7 @@ async function createKey(id: string): Promise<ICodeScrimPackageKey> {
 function createDraft(): ICodeScrimRecordingDraft {
 	return {
 		id: 'package-test',
-		duration: 2_000,
+		duration: 4_000,
 		checkpoints: [{
 			timestamp: 0,
 			eventIndex: 0,
@@ -139,6 +139,22 @@ function createDraft(): ICodeScrimRecordingDraft {
 			domain: 'terminal',
 			kind: 'terminal.data',
 			payload: { terminalId: 1, data: '\u001b[32mready\u001b[0m' },
+		}, {
+			id: 'package-test:2',
+			version: 1,
+			timestamp: 2_000,
+			sequence: 2,
+			domain: 'terminal',
+			kind: 'terminal.commandStarted',
+			payload: { terminalId: 1, terminalTitle: 'PowerShell', commandId: '1:test', command: 'npm test', cwd: 'C:\\lesson', commandLineConfidence: 'high', isTrusted: true },
+		}, {
+			id: 'package-test:3',
+			version: 1,
+			timestamp: 3_500,
+			sequence: 3,
+			domain: 'terminal',
+			kind: 'terminal.commandFinished',
+			payload: { terminalId: 1, commandId: '1:test', cwd: 'C:\\lesson', exitCode: 0 },
 		}],
 	};
 }

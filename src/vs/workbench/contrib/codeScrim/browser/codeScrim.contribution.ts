@@ -49,7 +49,9 @@ class CodeScrimRecordingControlsContribution {
 
 	constructor(
 		@ICodeScrimRecorderService recorderService: ICodeScrimRecorderService,
+		@ICodeScrimLayoutService layoutService: ICodeScrimLayoutService,
 	) {
+		layoutService.restoreStaleCodeScrimLayout();
 		// Resolve the recorder after workbench restoration so its native controls and listeners are
 		// available without requiring the command palette to instantiate the service first.
 		void recorderService.initialize();

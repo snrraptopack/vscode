@@ -19,8 +19,8 @@ import { localize } from '../../../../nls.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
-import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
-import { ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
+import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
+import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
 import { CodeScrimTerminalReplay } from './codeScrimTerminalReplay.js';
 
 const REPLAY_TICK_INTERVAL = 16;
@@ -51,6 +51,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	private _activeResource: ICodeScrimWorkspaceResource | undefined;
 	private _learnerExperiments: readonly ICodeScrimLearnerExperiment[] = [];
 	private _activeLearnerExperimentId: string | undefined;
+	private _terminalCommands: readonly ICodeScrimTerminalCommandActivity[] = [];
 	private learnerExperimentSequence = 0;
 	private replayActiveResource: ICodeScrimWorkspaceResource | undefined;
 	private pendingActiveResource: ICodeScrimWorkspaceResource | undefined;
@@ -91,6 +92,10 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 	get terminalState(): ICodeScrimTerminalState {
 		return this.terminalReplay.state;
+	}
+
+	get terminalCommands(): readonly ICodeScrimTerminalCommandActivity[] {
+		return this._terminalCommands;
 	}
 
 	constructor(
@@ -148,6 +153,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this.operationVersion++;
 		this.timer.clear();
 		this.ticking = false;
+		this._terminalCommands = [];
 		this.terminalReplay.reset();
 		this.publishIdle();
 	}
@@ -286,6 +292,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
 			this.activeDraft = draft;
+			this._terminalCommands = collectCodeScrimTerminalCommands(draft.events);
 			this.publish('preparing', 0);
 			this.prepareWorkspace(draft, draft.checkpoints[0]);
 			await this.startPreparedReplay(draft, operation);

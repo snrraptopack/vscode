@@ -6,6 +6,7 @@
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { ITerminalInstance, ITerminalService } from '../../terminal/browser/terminal.js';
 import { CodeScrimRecordingEventData } from '../common/codeScrimRecording.js';
+import { CodeScrimTerminalCommandRecorder } from './codeScrimTerminalCommandRecorder.js';
 
 /** Observes real workbench terminals while leaving terminal execution entirely to VS Code. */
 export class CodeScrimTerminalRecorder {
@@ -21,6 +22,7 @@ export class CodeScrimTerminalRecorder {
 	}
 
 	attach(listeners: DisposableStore): void {
+		const commandRecorder = new CodeScrimTerminalCommandRecorder(this.append);
 		const currentIds = new Set(this.terminalService.instances.map(instance => instance.instanceId));
 		for (const terminalId of [...this.knownTerminalIds]) {
 			if (!currentIds.has(terminalId)) {
@@ -29,9 +31,9 @@ export class CodeScrimTerminalRecorder {
 			}
 		}
 		for (const instance of this.terminalService.instances) {
-			this.observe(instance, listeners);
+			this.observe(instance, listeners, commandRecorder);
 		}
-		listeners.add(this.terminalService.onDidCreateInstance(instance => this.observe(instance, listeners)));
+		listeners.add(this.terminalService.onDidCreateInstance(instance => this.observe(instance, listeners, commandRecorder)));
 		listeners.add(this.terminalService.onDidChangeActiveInstance(instance => this.append({
 			domain: 'terminal',
 			kind: 'terminal.activeChanged',
@@ -53,7 +55,7 @@ export class CodeScrimTerminalRecorder {
 		});
 	}
 
-	private observe(instance: ITerminalInstance, listeners: DisposableStore): void {
+	private observe(instance: ITerminalInstance, listeners: DisposableStore, commandRecorder: CodeScrimTerminalCommandRecorder): void {
 		if (!this.knownTerminalIds.has(instance.instanceId)) {
 			this.knownTerminalIds.add(instance.instanceId);
 			this.append({
@@ -88,5 +90,6 @@ export class CodeScrimTerminalRecorder {
 			kind: 'terminal.exited',
 			payload: { terminalId: instance.instanceId, exitCode: typeof exit === 'number' ? exit : undefined },
 		})));
+		commandRecorder.observe(instance, listeners);
 	}
 }

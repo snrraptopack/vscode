@@ -6,7 +6,7 @@ The CodeScrim package is the portable product asset. It must be deterministic, s
 
 ## Container
 
-The implemented `.scrim` v3 format is an opaque binary envelope:
+The implemented `.scrim` v4 format is an opaque binary envelope:
 
 ```text
 magic bytes: CODESCRM
@@ -80,7 +80,9 @@ The first editor schema uses these version-1 event kinds:
 
 The first workspace schema uses `workspace.entriesChanged`. Its payload atomically removes zero or more portable workspace resources and introduces zero or more directory/file entries. File entries carry base64 bytes in the in-memory draft; the package writer will move those bytes into content-addressed blobs.
 
-The first terminal schema records lifecycle, active terminal, raw ANSI output, semantic input, dimensions, title, and exit state. Input is retained for later command markers, but passive replay renders only the PTY output stream so shell echo is not duplicated. Terminal checkpoints store the accumulated presentation stream in content-addressed blobs. Replaying or seeking never creates a shell and never forwards recorded input to the host.
+The first terminal schema records lifecycle, active terminal, raw ANSI output, semantic input, dimensions, title, exit state, and shell-integration command boundaries. A command boundary carries its stable ID, terminal, command line, confidence, trust flag, working directory, start/end timestamps, and optional exit code. Passive replay renders only the PTY output stream so shell echo is not duplicated. Terminal checkpoints store the accumulated presentation stream in content-addressed blobs. Replaying or seeking never creates a shell and never forwards recorded input or command lines to the host.
+
+The learner timeline derives terminal activity from those command boundaries. Nearby commands collapse into quiet clusters, the activity layer appears only while the native Terminal panel is visible, and command text is revealed only through hover or the selected cluster inspector. Learner experiment markers remain the primary persistent timeline markers.
 
 Editor resources are represented by workspace-root index and normalized forward-slash relative path. Text changes preserve the model event's descending range-offset order. The current in-memory draft also stores the authoritative full document text after each edit as an integrity anchor. That prevents a damaged or stale incremental range from corrupting every later replay frame. The package writer will replace this per-edit duplication with content-addressed chunks and periodic text anchors/checkpoints while retaining the same deterministic recovery guarantee.
 

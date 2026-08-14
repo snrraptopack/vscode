@@ -40,6 +40,7 @@ import { CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimReplayServ
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
 import { CodeScrimLessonEditorInput } from './codeScrimLessonEditorInput.js';
 import { CodeScrimTerminalSurface } from './codeScrimTerminalSurface.js';
+import { CodeScrimTerminalTimeline } from './codeScrimTerminalTimeline.js';
 
 interface ITranscriptEntry {
 	readonly start: number;
@@ -64,6 +65,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private editorHost: HTMLElement | undefined;
 	private codeEditor: CodeEditorWidget | undefined;
 	private terminalSurface: CodeScrimTerminalSurface | undefined;
+	private terminalTimeline: CodeScrimTerminalTimeline | undefined;
 	private diffEditorHost: HTMLElement | undefined;
 	private diffEditor: DiffEditorWidget | undefined;
 	private navigationRevealButton: HTMLButtonElement | undefined;
@@ -413,6 +415,8 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		const timeline = DOM.append(transport, DOM.$('.codescrim-session-timeline'));
 		this.experimentPopover = DOM.append(timeline, DOM.$('.codescrim-session-experiment-popover'));
 		this.experimentPopover.hidden = true;
+		const terminalPopover = DOM.append(timeline, DOM.$('.codescrim-session-terminal-popover'));
+		terminalPopover.hidden = true;
 		const timelineMeta = DOM.append(timeline, DOM.$('.codescrim-session-timeline-meta'));
 		this.status = DOM.append(timelineMeta, DOM.$('.codescrim-session-status', { 'aria-live': 'polite' }));
 		this.time = DOM.append(timelineMeta, DOM.$('output.codescrim-session-time'));
@@ -428,6 +432,18 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.timelineMarkers = DOM.append(timelineTrack, DOM.$('.codescrim-session-timeline-markers', {
 			'aria-label': localize('codeScrim.learnerExperimentMarkers', "Learner experiment markers"),
 		}));
+		const terminalMarkers = DOM.append(timelineTrack, DOM.$('.codescrim-session-terminal-markers', {
+			'aria-label': localize('codeScrim.terminalActivityMarkers', "Terminal activity markers"),
+		}));
+		if (this.terminalSurface) {
+			this.terminalTimeline = this._register(this.instantiationService.createInstance(
+				CodeScrimTerminalTimeline,
+				terminalMarkers,
+				terminalPopover,
+				this.terminalSurface,
+				() => this.dismissExperimentPopover(),
+			));
+		}
 		this._register(DOM.addDisposableListener(this.progress, DOM.EventType.POINTER_DOWN, () => this.beginTimelineScrub()));
 		this._register(DOM.addDisposableListener(this.progress, DOM.EventType.INPUT, () => {
 			const position = Number(this.progress?.value ?? 0);
@@ -480,6 +496,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	}
 
 	private async selectLearnerExperiment(id: string): Promise<void> {
+		this.terminalTimeline?.dismiss();
 		this.closeExperimentReview();
 		await this.replayService.openLearnerExperiment(id);
 		if (this.replayService.activeLearnerExperimentId !== id) {

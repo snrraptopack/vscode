@@ -136,7 +136,7 @@ The active lesson initially owns a fixed native workspace inside the editor area
 - the center is an unframed editor canvas with a docked transport;
 - each rail owns its collapse action; when collapsed, one restore action remains on the corresponding edge of the center canvas.
 
-`ICodeScrimLayoutService` leases the surrounding workbench layout while a lesson is visible. It hides document tabs, editor-group actions, the global layout controls, activity bar, normal sidebars, panel, and status bar. Attempts to reopen those workbench parts during the lease are rejected so they cannot squeeze or split the lesson. Every prior visibility and option value is restored when the last lesson lease closes.
+`ICodeScrimLayoutService` leases the surrounding workbench layout while a lesson is visible. It hides document tabs, editor-group actions, the global layout controls, activity bar, normal sidebars, panel, and status bar. Attempts to reopen those workbench parts during the lease are rejected so they cannot squeeze or split the lesson. Every prior visibility and option value is restored when the last lesson lease closes. The visibility snapshot is also persisted before the lease changes the native layout, allowing the next startup to recover the author workbench if the window exits while a lesson is open.
 
 Playback still targets real workbench surfaces: normal Monaco text models and editors, the native browser editor, terminal instances, and debug services. The lesson shell must not embed simulated copies of those surfaces.
 

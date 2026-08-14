@@ -14,11 +14,31 @@ export interface ICodeScrimTerminalCheckpoint {
 	readonly exitCode?: number;
 }
 
+export interface ICodeScrimTerminalCommandActivity {
+	readonly commandId: string;
+	readonly terminalId: number;
+	readonly terminalTitle: string;
+	readonly command: string;
+	readonly cwd?: string;
+	readonly commandLineConfidence: 'low' | 'medium' | 'high';
+	readonly isTrusted: boolean;
+	readonly startedAt: number;
+	readonly finishedAt?: number;
+	readonly exitCode?: number;
+}
+
+export interface ICodeScrimTerminalCommandCluster {
+	readonly position: number;
+	readonly commands: readonly ICodeScrimTerminalCommandActivity[];
+}
+
 export type CodeScrimTerminalEventData =
 	| { readonly kind: 'terminal.created'; readonly payload: Omit<ICodeScrimTerminalCheckpoint, 'output' | 'exited' | 'exitCode'> }
 	| { readonly kind: 'terminal.activeChanged'; readonly payload: { readonly terminalId?: number } }
 	| { readonly kind: 'terminal.data'; readonly payload: { readonly terminalId: number; readonly data: string } }
 	| { readonly kind: 'terminal.input'; readonly payload: { readonly terminalId: number; readonly data: string } }
+	| { readonly kind: 'terminal.commandStarted'; readonly payload: { readonly terminalId: number; readonly terminalTitle: string; readonly commandId: string; readonly command: string; readonly cwd?: string; readonly commandLineConfidence: 'low' | 'medium' | 'high'; readonly isTrusted: boolean } }
+	| { readonly kind: 'terminal.commandFinished'; readonly payload: { readonly terminalId: number; readonly commandId: string; readonly cwd?: string; readonly exitCode?: number } }
 	| { readonly kind: 'terminal.dimensionsChanged'; readonly payload: { readonly terminalId: number; readonly cols: number; readonly rows: number } }
 	| { readonly kind: 'terminal.titleChanged'; readonly payload: { readonly terminalId: number; readonly title: string } }
 	| { readonly kind: 'terminal.exited'; readonly payload: { readonly terminalId: number; readonly exitCode?: number } }
@@ -61,8 +81,11 @@ export class CodeScrimTerminalState {
 				this.update(event.payload.terminalId, terminal => ({ ...terminal, output: terminal.output + event.payload.data }));
 				break;
 			case 'terminal.input':
+			case 'terminal.commandStarted':
+			case 'terminal.commandFinished':
 				// PTY output normally echoes input. Keep input as semantic timeline data without
-				// rendering it twice into the passive terminal snapshot.
+				// rendering it twice into the passive terminal snapshot. Command boundaries are
+				// timeline metadata and likewise do not mutate terminal presentation.
 				break;
 			case 'terminal.dimensionsChanged':
 				this.update(event.payload.terminalId, terminal => ({ ...terminal, cols: event.payload.cols, rows: event.payload.rows }));
