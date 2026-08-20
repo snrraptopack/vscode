@@ -6,6 +6,7 @@
 import { IProcessPropertyMap, IProcessReadyEvent, ITerminalChildProcess, ProcessPropertyType } from '../../../../platform/terminal/common/terminal.js';
 import { BasePty } from '../../terminal/common/basePty.js';
 import { ICodeScrimTerminalCheckpoint } from '../common/codeScrimTerminal.js';
+import { projectCodeScrimTerminalOutput } from './codeScrimTerminalPresentation.js';
 
 /**
  * Read-only process behind CodeScrim's native replay terminals.
@@ -18,15 +19,18 @@ export class CodeScrimReplayPty extends BasePty implements ITerminalChildProcess
 	private started = false;
 	private renderedOutput = '';
 	private latest: ICodeScrimTerminalCheckpoint;
+	private recordedRoot: string | undefined;
 
 	constructor(
 		id: number,
 		recorded: ICodeScrimTerminalCheckpoint,
+		private readonly displayRoot: string,
 		cols: number,
 		rows: number,
 	) {
 		super(id, false);
 		this.latest = recorded;
+		this.recordedRoot = recorded.cwd;
 		this._lastDimensions.cols = cols;
 		this._lastDimensions.rows = rows;
 		this.setRecordedProperties(recorded);
@@ -36,7 +40,7 @@ export class CodeScrimReplayPty extends BasePty implements ITerminalChildProcess
 		this.started = true;
 		const ready: IProcessReadyEvent = {
 			pid: -1,
-			cwd: this.latest.cwd ?? '',
+			cwd: this.displayRoot,
 			windowsPty: undefined,
 		};
 		this.handleReady(ready);
@@ -46,15 +50,12 @@ export class CodeScrimReplayPty extends BasePty implements ITerminalChildProcess
 
 	update(recorded: ICodeScrimTerminalCheckpoint): void {
 		const previousTitle = this.latest.title;
-		const previousCwd = this.latest.cwd;
 		this.latest = recorded;
+		this.recordedRoot ??= recorded.cwd;
 		this.setRecordedProperties(recorded);
 
 		if (previousTitle !== recorded.title) {
 			this.handleDidChangeProperty({ type: ProcessPropertyType.Title, value: this.displayTitle(recorded) });
-		}
-		if (previousCwd !== recorded.cwd) {
-			this.handleDidChangeProperty({ type: ProcessPropertyType.Cwd, value: recorded.cwd ?? '' });
 		}
 		if (this.started) {
 			this.writeOutput(recorded.output);
@@ -107,8 +108,8 @@ export class CodeScrimReplayPty extends BasePty implements ITerminalChildProcess
 
 	private setRecordedProperties(recorded: ICodeScrimTerminalCheckpoint): void {
 		this._properties.title = this.displayTitle(recorded);
-		this._properties.cwd = recorded.cwd ?? '';
-		this._properties.initialCwd = recorded.cwd ?? '';
+		this._properties.cwd = this.displayRoot;
+		this._properties.initialCwd = this.displayRoot;
 	}
 
 	private displayTitle(recorded: ICodeScrimTerminalCheckpoint): string {
@@ -116,16 +117,17 @@ export class CodeScrimReplayPty extends BasePty implements ITerminalChildProcess
 	}
 
 	private writeOutput(output: string): void {
-		if (output.startsWith(this.renderedOutput)) {
-			const delta = output.slice(this.renderedOutput.length);
+		const projectedOutput = projectCodeScrimTerminalOutput(output, this.recordedRoot, this.displayRoot);
+		if (projectedOutput.startsWith(this.renderedOutput)) {
+			const delta = projectedOutput.slice(this.renderedOutput.length);
 			if (delta) {
 				this.handleData(delta);
 			}
 		} else {
 			// Seeking can replace the full state. RIS clears the viewport and scrollback before
 			// checkpoint output is reconstructed in this same native terminal instance.
-			this.handleData(`\x1bc${output}`);
+			this.handleData(`\x1bc${projectedOutput}`);
 		}
-		this.renderedOutput = output;
+		this.renderedOutput = projectedOutput;
 	}
 }

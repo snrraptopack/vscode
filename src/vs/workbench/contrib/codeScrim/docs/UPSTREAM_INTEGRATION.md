@@ -67,6 +67,9 @@ git config rerere.enabled true
 - Did browser-view IPC or CDP behavior change?
 - Did editor serialization or group restoration change?
 - Did terminal process/input ownership change?
+- Does the opt-in `VSCODE_CODESCRIM_WORKSPACE_*` PowerShell prompt adapter still wrap the native prompt without changing OSC cwd metadata or non-CodeScrim terminals?
+- Does `ITerminalService.registerShellLaunchConfigResolver` still run after profile conversion and before cwd resolution so lesson-scoped New/Split terminals can receive the learner root without importing CodeScrim into Terminal?
+- Do `moveToBackground` and `showBackgroundTerminal` still preserve a live terminal instance so CodeScrim can temporarily quarantine author terminals and restore them on lesson exit?
 - Did debug-session lifecycle change?
 - Did security, workspace trust, or permission behavior change?
 - Does the CodeScrim contribution still satisfy layer rules?

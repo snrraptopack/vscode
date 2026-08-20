@@ -8,7 +8,7 @@ import * as cssValue from '../../../../base/browser/cssValue.js';
 import { DeferredPromise, timeout, type MaybePromise } from '../../../../base/common/async.js';
 import { debounce, memoize } from '../../../../base/common/decorators.js';
 import { DynamicListEventMultiplexer, Emitter, Event, IDynamicListEventMultiplexer } from '../../../../base/common/event.js';
-import { Disposable, DisposableMap, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore, IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { isMacintosh, isWeb } from '../../../../base/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -29,7 +29,7 @@ import { IThemeService, Themable } from '../../../../platform/theme/common/theme
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { VirtualWorkspaceContext } from '../../../common/contextkeys.js';
-import { ICreateTerminalOptions, IDetachedTerminalInstance, IDetachedXTermOptions, IRequestAddInstanceToGroupEvent, ITerminalConfigurationService, ITerminalEditorService, ITerminalGroup, ITerminalGroupService, ITerminalInstance, ITerminalInstanceHost, ITerminalInstanceService, ITerminalLocationOptions, ITerminalService, ITerminalServiceNativeDelegate, TerminalConnectionState, TerminalEditorLocation } from './terminal.js';
+import { ICreateTerminalOptions, IDetachedTerminalInstance, IDetachedXTermOptions, IRequestAddInstanceToGroupEvent, ITerminalConfigurationService, ITerminalEditorService, ITerminalGroup, ITerminalGroupService, ITerminalInstance, ITerminalInstanceHost, ITerminalInstanceService, ITerminalLocationOptions, ITerminalService, ITerminalServiceNativeDelegate, TerminalConnectionState, TerminalEditorLocation, TerminalShellLaunchConfigResolver } from './terminal.js';
 import { getCwdForSplit } from './terminalActions.js';
 import { TerminalEditorInput } from './terminalEditorInput.js';
 import { getColorStyleContent, getUriClasses } from './terminalIcon.js';
@@ -82,6 +82,7 @@ export class TerminalService extends Disposable implements ITerminalService {
 	private _terminalCountContextKey: IContextKey<number>;
 	private _nativeDelegate?: ITerminalServiceNativeDelegate;
 	private _shutdownWindowCount?: number;
+	private readonly _shellLaunchConfigResolvers = new Set<TerminalShellLaunchConfigResolver>();
 
 	get isProcessSupportRegistered(): boolean { return !!this._processSupportContextKey.get(); }
 
@@ -1002,7 +1003,10 @@ export class TerminalService extends Disposable implements ITerminalService {
 		if (!config) {
 			config = this._terminalProfileService.getDefaultProfile();
 		}
-		const shellLaunchConfig = config && hasKey(config, { extensionIdentifier: true }) ? {} : this._terminalInstanceService.convertProfileToShellLaunchConfig(config || {});
+		let shellLaunchConfig = config && hasKey(config, { extensionIdentifier: true }) ? {} : this._terminalInstanceService.convertProfileToShellLaunchConfig(config || {});
+		for (const resolver of this._shellLaunchConfigResolvers) {
+			shellLaunchConfig = resolver(shellLaunchConfig, options);
+		}
 
 		// Get the contributed profile if it was provided
 		const contributedProfile = options?.skipContributedProfileCheck ? undefined : await this._getContributedProfile(shellLaunchConfig, options);
@@ -1101,6 +1105,11 @@ export class TerminalService extends Disposable implements ITerminalService {
 		this.setActiveInstance(instance);
 		await instance.focusWhenReady();
 		return instance;
+	}
+
+	registerShellLaunchConfigResolver(resolver: TerminalShellLaunchConfigResolver): IDisposable {
+		this._shellLaunchConfigResolvers.add(resolver);
+		return toDisposable(() => this._shellLaunchConfigResolvers.delete(resolver));
 	}
 
 	private async _getContributedProfile(shellLaunchConfig: IShellLaunchConfig, options?: ICreateTerminalOptions): Promise<IExtensionTerminalProfile | undefined> {

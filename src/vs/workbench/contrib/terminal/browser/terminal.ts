@@ -563,6 +563,9 @@ export interface ITerminalService extends ITerminalInstanceHost {
 	 */
 	createAndFocusTerminal(options?: ICreateTerminalOptions): Promise<ITerminalInstance>;
 
+	/** Register a scoped policy for native terminal process creation. */
+	registerShellLaunchConfigResolver(resolver: TerminalShellLaunchConfigResolver): IDisposable;
+
 	/**
 	 * Creates a detached xterm instance which is not attached to the DOM or
 	 * tracked as a terminal instance.
@@ -759,6 +762,9 @@ export interface ICreateTerminalOptions {
 	 */
 	skipContributedProfileCheck?: boolean;
 }
+
+/** Resolves a shell launch configuration immediately before a terminal process is created. */
+export type TerminalShellLaunchConfigResolver = (shellLaunchConfig: IShellLaunchConfig, options: ICreateTerminalOptions | undefined) => IShellLaunchConfig;
 
 export interface TerminalEditorLocation {
 	viewColumn: GroupIdentifier | SIDE_GROUP_TYPE | ACTIVE_GROUP_TYPE | AUX_WINDOW_GROUP_TYPE;

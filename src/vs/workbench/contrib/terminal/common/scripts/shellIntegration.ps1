@@ -22,7 +22,12 @@ $Global:__VSCodeState = @{
 	IsStable = $null
 	IsA11yMode = $null
 	IsWindows10 = $false
+	CodeScrimWorkspaceRoot = $env:VSCODE_CODESCRIM_WORKSPACE_ROOT
+	CodeScrimWorkspaceLabel = $env:VSCODE_CODESCRIM_WORKSPACE_LABEL
 }
+
+$env:VSCODE_CODESCRIM_WORKSPACE_ROOT = $null
+$env:VSCODE_CODESCRIM_WORKSPACE_LABEL = $null
 
 # Store the nonce in a regular variable and unset the environment variable. It's by design that
 # anything that can execute PowerShell code can read the nonce, as it's basically impossible to hide
@@ -103,6 +108,28 @@ function Global:__VSCode-Escape-Value([string]$value) {
 		})
 }
 
+function Global:__VSCode-CodeScrim-Prompt() {
+	$Root = $Global:__VSCodeState.CodeScrimWorkspaceRoot
+	$Label = $Global:__VSCodeState.CodeScrimWorkspaceLabel
+	if (-not $Root -or -not $Label -or $pwd.Provider.Name -ne 'FileSystem') {
+		return $null
+	}
+
+	$ProviderPath = $pwd.ProviderPath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+	$NormalizedRoot = $Root.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+	if (-not $ProviderPath.Equals($NormalizedRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+		-not $ProviderPath.StartsWith("$NormalizedRoot$([System.IO.Path]::DirectorySeparatorChar)", [System.StringComparison]::OrdinalIgnoreCase)) {
+		return $null
+	}
+
+	$RelativePath = $ProviderPath.Substring($NormalizedRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+	$DisplayPath = "CodeScrim:\$Label"
+	if ($RelativePath) {
+		$DisplayPath += "\$RelativePath"
+	}
+	return "PS $DisplayPath> "
+}
+
 function Global:Prompt() {
 	$FakeCode = [int]!$global:?
 	# NOTE: We disable strict mode for the scope of this function because it unhelpfully throws an
@@ -148,8 +175,10 @@ function Global:Prompt() {
 	if ($FakeCode -ne 0) {
 		Write-Error "failure" -ea ignore
 	}
-	# Run the original prompt
-	$OriginalPrompt += $Global:__VSCodeState.OriginalPrompt.Invoke()
+	# Keep CodeScrim's disposable storage URI private while preserving the real cwd in shell
+	# integration metadata for file links, command detection, and process execution.
+	$CodeScrimPrompt = __VSCode-CodeScrim-Prompt
+	$OriginalPrompt += if ($null -ne $CodeScrimPrompt) { $CodeScrimPrompt } else { $Global:__VSCodeState.OriginalPrompt.Invoke() }
 	$Result += $OriginalPrompt
 
 	# Prompt

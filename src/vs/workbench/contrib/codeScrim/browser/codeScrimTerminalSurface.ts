@@ -6,22 +6,24 @@
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable, IDisposable } from '../../../../base/common/lifecycle.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { TerminalLocation } from '../../../../platform/terminal/common/terminal.js';
 import { localize } from '../../../../nls.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
 import { ITerminalInstance, ITerminalService } from '../../terminal/browser/terminal.js';
 import { TerminalContextKeys } from '../../terminal/common/terminalContextKey.js';
 import { ICodeScrimReplayService } from '../common/codeScrimReplay.js';
+import { ICodeScrimSessionService } from '../common/codeScrimSession.js';
 import { ICodeScrimTerminalCheckpoint, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
+import { CodeScrimLearnerTerminal } from './codeScrimLearnerTerminal.js';
 import { CodeScrimReplayPty } from './codeScrimReplayPty.js';
+import { getCodeScrimDisplayRoot, getCodeScrimWorkspaceLabel } from './codeScrimTerminalPresentation.js';
 
 interface ICodeScrimNativeTerminal {
 	readonly instance: ITerminalInstance;
 	pty: CodeScrimReplayPty | undefined;
 	readonly disposeListener: IDisposable;
 }
-
-const EMPTY_LEARNER_TERMINAL_ID = -1;
 
 /** Hosts recorded terminal tracks in VS Code's normal integrated Terminal panel. */
 export class CodeScrimTerminalSurface extends Disposable {
@@ -30,23 +32,28 @@ export class CodeScrimTerminalSurface extends Disposable {
 	private readonly latest = new Map<number, ICodeScrimTerminalCheckpoint>();
 	private readonly dismissed = new Set<number>();
 	private readonly disposing = new Set<number>();
+	private readonly learnerTerminal: CodeScrimLearnerTerminal;
 	private hasRevealedTerminal = false;
 
 	constructor(
 		@ICodeScrimReplayService private readonly replayService: ICodeScrimReplayService,
+		@ICodeScrimSessionService private readonly sessionService: ICodeScrimSessionService,
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
+		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
+		this.learnerTerminal = this._register(instantiationService.createInstance(CodeScrimLearnerTerminal));
 		this._register(this.replayService.onDidChangeTerminalState(state => this.render(state)));
+		this._register(this.replayService.onDidChangeWorkspace(() => this.learnerTerminal.reconcileWorkspaceRoot()));
 		this.render(this.replayService.terminalState);
 	}
 
 	private render(state: ICodeScrimTerminalState): void {
 		const presentIds = new Set(state.terminals.map(terminal => terminal.terminalId));
 		for (const terminalId of this.terminals.keys()) {
-			if (terminalId !== EMPTY_LEARNER_TERMINAL_ID && !presentIds.has(terminalId)) {
+			if (!presentIds.has(terminalId)) {
 				this.disposeTerminal(terminalId);
 			}
 		}
@@ -68,22 +75,14 @@ export class CodeScrimTerminalSurface extends Disposable {
 		}
 	}
 
-	/** Toggle the normal workbench panel, creating a safe empty learner terminal when needed. */
+	/** Toggle the normal workbench panel, creating the explicit learner shell when opening it. */
 	async togglePanel(): Promise<void> {
 		if (this.contextKeyService.getContextKeyValue<boolean>(TerminalContextKeys.viewShowing.key)) {
 			this.layoutService.setPartHidden(true, Parts.PANEL_PART);
 			return;
 		}
 
-		let terminal = this.getPreferredTerminal();
-		if (!terminal) {
-			await this.ensureEmptyLearnerTerminal();
-			terminal = this.getPreferredTerminal();
-		}
-		if (terminal) {
-			this.terminalService.setActiveInstance(terminal.instance);
-			await this.terminalService.revealActiveTerminal(false);
-		}
+		await this.learnerTerminal.show();
 	}
 
 	/** Reveal one recorded terminal without forwarding input to its replay PTY. */
@@ -109,6 +108,8 @@ export class CodeScrimTerminalSurface extends Disposable {
 		const terminalEntryRef: { value?: ICodeScrimNativeTerminal } = {};
 		let replayPty: CodeScrimReplayPty | undefined;
 		const title = recorded.title || localize('codeScrim.terminal', "Terminal");
+		const workspaceLabel = getCodeScrimWorkspaceLabel(this.sessionService.state?.lesson.title, localize('codeScrim.learnerWorkspaceLabel', "Workspace"));
+		const displayRoot = getCodeScrimDisplayRoot(workspaceLabel);
 		const instance = await this.terminalService.createTerminal({
 			config: {
 				name: localize('codeScrim.replayTerminalName', "{0} (Replay, read-only)", title),
@@ -118,7 +119,7 @@ export class CodeScrimTerminalSurface extends Disposable {
 				ignoreShellIntegration: true,
 				waitOnExit: false,
 				customPtyImplementation: (id, cols, rows) => {
-					const pty = new CodeScrimReplayPty(id, this.latest.get(recorded.terminalId) ?? recorded, cols, rows);
+					const pty = new CodeScrimReplayPty(id, this.latest.get(recorded.terminalId) ?? recorded, displayRoot, cols, rows);
 					replayPty = pty;
 					if (terminalEntryRef.value) {
 						terminalEntryRef.value.pty = pty;
@@ -158,33 +159,6 @@ export class CodeScrimTerminalSurface extends Disposable {
 			this.hasRevealedTerminal = true;
 			await this.terminalService.revealActiveTerminal(true);
 		}
-	}
-
-	private async ensureEmptyLearnerTerminal(): Promise<void> {
-		if (this.terminals.has(EMPTY_LEARNER_TERMINAL_ID) || this.pending.has(EMPTY_LEARNER_TERMINAL_ID)) {
-			await this.pending.get(EMPTY_LEARNER_TERMINAL_ID);
-			return;
-		}
-
-		const emptyTerminal: ICodeScrimTerminalCheckpoint = Object.freeze({
-			terminalId: EMPTY_LEARNER_TERMINAL_ID,
-			title: localize('codeScrim.learnerTerminal', "Learner Terminal"),
-			cols: 80,
-			rows: 24,
-			output: localize('codeScrim.learnerTerminalReadOnly', "CodeScrim learner terminal is read-only until sandbox execution is enabled.\r\n"),
-			exited: false,
-		});
-		this.latest.set(EMPTY_LEARNER_TERMINAL_ID, emptyTerminal);
-		const creation = this.createTerminal(emptyTerminal).finally(() => this.pending.delete(EMPTY_LEARNER_TERMINAL_ID));
-		this.pending.set(EMPTY_LEARNER_TERMINAL_ID, creation);
-		await creation;
-	}
-
-	private getPreferredTerminal(): ICodeScrimNativeTerminal | undefined {
-		const activeId = this.replayService.terminalState.activeTerminalId;
-		return activeId === undefined
-			? this.terminals.values().next().value
-			: this.terminals.get(activeId) ?? this.terminals.values().next().value;
 	}
 
 	private disposeTerminal(terminalId: number): void {

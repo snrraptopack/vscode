@@ -86,7 +86,7 @@ The learner timeline derives terminal activity from those command boundaries. Ne
 
 Editor resources are represented by workspace-root index and normalized forward-slash relative path. Text changes preserve the model event's descending range-offset order. The current in-memory draft also stores the authoritative full document text after each edit as an integrity anchor. That prevents a damaged or stale incremental range from corrupting every later replay frame. The package writer will replace this per-edit duplication with content-addressed chunks and periodic text anchors/checkpoints while retaining the same deterministic recovery guarantee.
 
-Editor diagnostics are not part of the first draft schema. A later diagnostic track will capture normalized marker snapshots on the shared session clock so recorded squiggles and Problems state remain deterministic across machines and toolchain versions. Live diagnostics from a learner's editable sandbox will be a separate overlay and will never rewrite the captured instructor track.
+Editor diagnostics are not serialized in the session schema. The native language providers derive live type information, hover content, completions, diagnostics, and Problems state from the materialized replay workspace for both instructor playback and learner edits.
 
 The in-memory recording draft includes a bounded snapshot of the starting workspace plus an initial document checkpoint for every workspace model already observed when recording begins. Workspace entries preserve directories and file bytes; document checkpoints additionally preserve unsaved text, language ID, version ID, and EOL sequence. Capture is first-write-wins: later edits never mutate the checkpoint used to restart replay.
 

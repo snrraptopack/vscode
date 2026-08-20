@@ -69,8 +69,7 @@ Status: in progress.
 - [x] Add compact learner/instructor comparison to the selected timeline-marker inspector.
 - Add publisher signatures and account/course key envelopes for distributable packages.
 - [x] Add required indexed intermediate checkpoints so long seeks restore the nearest snapshot instead of replaying from time zero.
-- Capture normalized diagnostic/marker snapshots on the session clock for deterministic squiggles and Problems state.
-- Keep captured instructor diagnostics separate from optional live diagnostics produced by a future learner sandbox.
+- [x] Connect file-backed replay models to native language providers so instructor playback and learner edits receive live inference, hover information, completions, and diagnostics.
 - [x] Enter learner edit mode immediately on editing and pause before the instructor timeline advances.
 - [x] Expose learner models to native language features without materializing them in the host workspace.
 - [x] Project checkpoints into a disposable CodeScrim-owned learner workspace with file-backed model URIs and crash recovery.
@@ -89,7 +88,7 @@ Acceptance criteria:
 - Replay writes are not captured as learner events.
 - A short native recording can be replayed without changing its final file contents or event ordering.
 
-Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, checkpoint-indexed seek, restart, manual file inspection, learner-owned file/folder creation, deterministic resume, and quiet learner experimentation now work for workspace, editor, and passive terminal events. The checkpoint index captures portable file bytes, unsaved document text, active files, selections, and accumulated terminal presentation under explicit safety limits. Replay owns an immutable instructor model plus a separately editable learner model for each materialized file. Recorded ANSI output is rendered in VS Code's native integrated Terminal panel through a read-only replay PTY; no command is executed during replay. Editing or creating a workspace entry pauses the instructor clock without adding another banner. Continue captures changed files and created entries in an in-memory learner checkpoint, silently restores the exact instructor frame, and resumes from that timestamp. Each captured experiment appears as a marker on the playback timeline; its compact inspector provides native diff review plus Restore, Keep, and Delete actions. Published key distribution/signatures, captured diagnostics, and remaining domains are intentionally not claimed yet.
+Current vertical-slice note: record, stop, recovery across restart, encrypted save/open, learner preview, play, pause, checkpoint-indexed seek, restart, manual file inspection, learner-owned file/folder creation, deterministic resume, and quiet learner experimentation now work for workspace, editor, and passive terminal events. The checkpoint index captures portable file bytes, unsaved document text, active files, selections, and accumulated terminal presentation under explicit safety limits. Replay owns an immutable instructor model plus a separately editable learner model for each materialized file. File-backed learner models participate in native language tooling throughout instructor playback and learner experimentation. Recorded ANSI output is rendered in VS Code's native integrated Terminal panel through a read-only replay PTY; no command is executed during replay. Editing or creating a workspace entry pauses the instructor clock without adding another banner. Continue captures changed files and created entries in an in-memory learner checkpoint, silently restores the exact instructor frame, and resumes from that timestamp. Each captured experiment appears as a marker on the playback timeline; its compact inspector provides native diff review plus Restore, Keep, and Delete actions. Published key distribution/signatures and remaining domains are intentionally not claimed yet.
 
 ## Milestone 3: Native browser integration
 
@@ -109,7 +108,7 @@ Acceptance criteria:
 - [x] Replay and seek recorded terminal presentation through the native integrated Terminal panel and a read-only replay PTY without executing commands.
 - [x] Add shell-integration command boundaries, deterministic multi-terminal switching, and progressively disclosed terminal activity markers.
 - Preserve the learner editor's recorded caret and active-line presentation when the native terminal panel opens or terminal replay begins. The current panel transition can make the editor appear to jump back to the start of the line.
-- Provide a real learner terminal rooted in the learner workspace.
+- [x] Provide a real learner terminal rooted in the disposable learner workspace, created only by explicit learner action and kept separate from read-only instructor terminal replay.
 - Capture debug lifecycle, breakpoints, focus, stack, variables, REPL, and relevant errors.
 - Define runnable checkpoints for exercises that require live debug state.
 
@@ -143,6 +142,7 @@ Acceptance criteria:
 ## Milestone 7: Secure learner execution
 
 - [x] Materialize a learner workspace from an instructor checkpoint without mutating instructor state.
+- [x] Provide an explicitly opened local learner shell as the pre-sandbox execution bridge, clearly documented as ordinary host execution.
 - Require an explicit learner action before running code, tasks, terminal commands, debug configurations, or project scripts.
 - Define local sandbox and remote/container runner capability levels.
 - Enforce process, CPU, memory, disk, time, network, secret, and filesystem policies.
