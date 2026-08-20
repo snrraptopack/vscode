@@ -75,7 +75,8 @@ Status: in progress.
 - [x] Expose learner models to native language features without materializing them in the host workspace.
 - [x] Project checkpoints into a disposable CodeScrim-owned learner workspace with file-backed model URIs and crash recovery.
 - [x] Let learners create files and folders from the Files tab and preserve those entries as learner experiment state.
-- [x] Replace the learner's flat file list with a native workbench tree supporting folder expansion, context creation, and constrained drag/drop.
+- [x] Replace the learner's flat file list with a native workbench tree supporting file icons, folder expansion, and contextual creation.
+- Complete learner-tree drag/drop isolation. Resource drags currently escape into the editor grid and may open or split an editor instead of completing the requested file operation.
 - [x] Capture learner changes as an in-memory checkpoint, restore the paused instructor frame, and continue from the same timestamp.
 - [x] Render learner-edit markers on the playback timeline.
 - [x] Make a marker open the learner checkpoint captured at that position.
@@ -108,6 +109,7 @@ Acceptance criteria:
 - [x] Capture terminal lifecycle, input, raw output, working directories, dimensions, title, and exit state.
 - [x] Replay and seek recorded terminal presentation through the native integrated Terminal panel and a read-only replay PTY without executing commands.
 - [x] Add shell-integration command boundaries, deterministic multi-terminal switching, and progressively disclosed terminal activity markers.
+- Preserve the learner editor's recorded caret and active-line presentation when the native terminal panel opens or terminal replay begins. The current panel transition can make the editor appear to jump back to the start of the line.
 - Provide a real learner terminal rooted in the learner workspace.
 - Capture debug lifecycle, breakpoints, focus, stack, variables, REPL, and relevant errors.
 - Define runnable checkpoints for exercises that require live debug state.
