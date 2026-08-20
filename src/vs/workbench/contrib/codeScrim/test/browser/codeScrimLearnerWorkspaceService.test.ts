@@ -72,7 +72,12 @@ suite('CodeScrimLearnerWorkspaceService', () => {
 		await service.applyWorkspaceChanges([], [folder, file]);
 		await service.writeText(file.resource, 'export const learner = true;');
 
-		const fileUri = service.toLearnerUri(file.resource)!;
+		const folderUri = service.toLearnerUri(folder.resource);
+		const fileUri = service.toLearnerUri(file.resource);
+		assert.ok(folderUri);
+		assert.ok(fileUri);
+		assert.strictEqual(await fileService.exists(folderUri), true);
+		assert.strictEqual(await fileService.exists(fileUri), true);
 		const scanned = await service.scanEntries();
 		assert.strictEqual((await fileService.readFile(fileUri)).value.toString(), 'export const learner = true;');
 		assert.deepStrictEqual(service.toWorkspaceResource(fileUri), file.resource);

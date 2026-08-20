@@ -54,7 +54,10 @@ export class CodeScrimLearnerWorkspaceService implements ICodeScrimLearnerWorksp
 		return this.operations.queue(async () => {
 			await this.deleteOwnedWorkspace(this.readStoredWorkspace());
 			this.synthesizedFiles.clear();
-			this.roots = collectCodeScrimWorkspaceRoots(draft);
+			const recordedRoots = collectCodeScrimWorkspaceRoots(draft);
+			// An empty lesson still needs one writable learner root. Without this fallback,
+			// file creation only updates replay memory because root 0 has no projected URI.
+			this.roots = recordedRoots.length ? recordedRoots : [0];
 			const workspaceRoot = joinPath(this.baseRoot, generateUuid());
 			this._workspaceRoot = workspaceRoot;
 			this.storageService.store(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceRoot.toString(), StorageScope.WORKSPACE, StorageTarget.MACHINE);

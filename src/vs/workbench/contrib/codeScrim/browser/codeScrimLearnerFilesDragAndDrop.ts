@@ -16,14 +16,13 @@ import { extractEditorsAndFilesDropData } from '../../../../platform/dnd/browser
 import { IFileService, IFileStat } from '../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
-import { ResourceListDnDHandler } from '../../../browser/dnd.js';
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
 import { ICodeScrimReplayService } from '../common/codeScrimReplay.js';
 
+const CODE_SCRIM_LEARNER_ENTRY_TRANSFER = 'application/vnd.codescrim.learner-entry';
+
 /** Native resource drag/drop constrained to CodeScrim's disposable learner projection. */
 export class CodeScrimLearnerFilesDragAndDrop extends Disposable implements ITreeDragAndDrop<IFileStat> {
-
-	private readonly resourceDragAndDrop: ResourceListDnDHandler<IFileStat>;
 
 	constructor(
 		private readonly getRoot: () => URI | undefined,
@@ -35,22 +34,31 @@ export class CodeScrimLearnerFilesDragAndDrop extends Disposable implements ITre
 		@ICodeScrimReplayService private readonly replayService: ICodeScrimReplayService,
 	) {
 		super();
-		this.resourceDragAndDrop = this._register(this.instantiationService.createInstance(ResourceListDnDHandler<IFileStat>, item => item.resource));
 	}
 
 	getDragURI(element: IFileStat): string {
-		return this.resourceDragAndDrop.getDragURI(element)!;
+		// A non-null URI makes the native tree row draggable. onDragStart removes the
+		// workbench-wide text payload before it can be interpreted as an editor input.
+		return element.resource.toString();
 	}
 
-	getDragLabel(elements: IFileStat[], originalEvent: DragEvent): string | undefined {
-		return this.resourceDragAndDrop.getDragLabel(elements);
+	getDragLabel(elements: IFileStat[], _originalEvent: DragEvent): string | undefined {
+		return elements.length === 1 ? elements[0].name : String(elements.length);
 	}
 
 	onDragStart(data: IDragAndDropData, originalEvent: DragEvent): void {
-		this.resourceDragAndDrop.onDragStart(data, originalEvent);
+		// Workbench lists initially publish their drag URI as text/plain. Do not add
+		// editor drag data here: CodeScrim entries must remain inside the learner tree
+		// instead of opening an editor or editor split when the pointer crosses the tree.
+		originalEvent.dataTransfer?.clearData();
+		originalEvent.dataTransfer?.setData(CODE_SCRIM_LEARNER_ENTRY_TRANSFER, 'internal');
 	}
 
-	onDragOver(_data: IDragAndDropData, _targetElement: IFileStat | undefined, _targetIndex: number | undefined, _targetSector: ListViewTargetSector | undefined, _originalEvent: DragEvent): boolean {
+	onDragOver(_data: IDragAndDropData, targetElement: IFileStat | undefined, _targetIndex: number | undefined, _targetSector: ListViewTargetSector | undefined, originalEvent: DragEvent): boolean | { accept: true; autoExpand: boolean } {
+		originalEvent.stopPropagation();
+		if (targetElement?.isDirectory) {
+			return { accept: true, autoExpand: true };
+		}
 		return !!this.getRoot();
 	}
 
@@ -59,6 +67,7 @@ export class CodeScrimLearnerFilesDragAndDrop extends Disposable implements ITre
 		if (!root) {
 			return;
 		}
+		originalEvent.stopPropagation();
 		const target = targetElement ? (targetElement.isDirectory ? targetElement.resource : dirname(targetElement.resource)) : root;
 		try {
 			if (data instanceof NativeDragAndDropData) {
