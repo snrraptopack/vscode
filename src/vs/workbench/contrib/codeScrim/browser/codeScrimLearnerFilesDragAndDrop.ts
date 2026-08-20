@@ -4,9 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IDragAndDropData } from '../../../../base/browser/dnd.js';
-import { IListDragOverEffect, ListDragOverEffectPosition, ListDragOverEffectType } from '../../../../base/browser/ui/list/list.js';
 import { ElementsDragAndDropData, ListViewTargetSector, NativeDragAndDropData } from '../../../../base/browser/ui/list/listView.js';
-import { ITreeDragAndDrop, ITreeDragOverReaction, TreeDragOverBubble } from '../../../../base/browser/ui/tree/tree.js';
+import { ITreeDragAndDrop } from '../../../../base/browser/ui/tree/tree.js';
 import { coalesce } from '../../../../base/common/arrays.js';
 import { getErrorMessage } from '../../../../base/common/errors.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
@@ -17,11 +16,14 @@ import { extractEditorsAndFilesDropData } from '../../../../platform/dnd/browser
 import { IFileService, IFileStat } from '../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { ResourceListDnDHandler } from '../../../browser/dnd.js';
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
 import { ICodeScrimReplayService } from '../common/codeScrimReplay.js';
 
 /** Native resource drag/drop constrained to CodeScrim's disposable learner projection. */
 export class CodeScrimLearnerFilesDragAndDrop extends Disposable implements ITreeDragAndDrop<IFileStat> {
+
+	private readonly resourceDragAndDrop: ResourceListDnDHandler<IFileStat>;
 
 	constructor(
 		private readonly getRoot: () => URI | undefined,
@@ -33,58 +35,26 @@ export class CodeScrimLearnerFilesDragAndDrop extends Disposable implements ITre
 		@ICodeScrimReplayService private readonly replayService: ICodeScrimReplayService,
 	) {
 		super();
+		this.resourceDragAndDrop = this._register(this.instantiationService.createInstance(ResourceListDnDHandler<IFileStat>, item => item.resource));
 	}
 
 	getDragURI(element: IFileStat): string {
-		return element.resource.toString();
+		return this.resourceDragAndDrop.getDragURI(element)!;
 	}
 
-	getDragLabel(elements: IFileStat[], _originalEvent: DragEvent): string | undefined {
-		return elements.length === 1 ? elements[0].name : String(elements.length);
+	getDragLabel(elements: IFileStat[], originalEvent: DragEvent): string | undefined {
+		return this.resourceDragAndDrop.getDragLabel(elements);
 	}
 
 	onDragStart(data: IDragAndDropData, originalEvent: DragEvent): void {
-		const elements = (data as ElementsDragAndDropData<IFileStat>).elements;
-		if (elements.length && originalEvent.dataTransfer) {
-			const uris = elements.map(element => element.resource.toString()).join('\r\n');
-			originalEvent.dataTransfer.setData('text/plain', uris);
-			originalEvent.dataTransfer.setData('text/uri-list', uris);
-			originalEvent.dataTransfer.effectAllowed = 'copyMove';
-		}
+		this.resourceDragAndDrop.onDragStart(data, originalEvent);
 	}
 
-	onDragOver(data: IDragAndDropData, targetElement: IFileStat | undefined, _targetIndex: number | undefined, _targetSector: ListViewTargetSector | undefined, originalEvent: DragEvent): boolean | ITreeDragOverReaction {
-		const root = this.getRoot();
-		if (!root) {
-			return false;
-		}
-
-		const isCopy = originalEvent.ctrlKey || originalEvent.altKey;
-		const effect: IListDragOverEffect = {
-			type: isCopy ? ListDragOverEffectType.Copy : ListDragOverEffectType.Move,
-			position: ListDragOverEffectPosition.Over,
-		};
-
-		if (!targetElement) {
-			return { accept: true, bubble: TreeDragOverBubble.Down, effect };
-		}
-
-		if (targetElement.isDirectory) {
-			if (data instanceof ElementsDragAndDropData) {
-				const elements = data.elements as IFileStat[];
-				if (elements.some(element => extUri.isEqual(element.resource, targetElement.resource) || extUri.isEqualOrParent(targetElement.resource, element.resource))) {
-					return false;
-				}
-			}
-			return { accept: true, bubble: TreeDragOverBubble.Down, effect, autoExpand: true };
-		}
-
-		return { accept: true, bubble: TreeDragOverBubble.Up, effect };
+	onDragOver(_data: IDragAndDropData, _targetElement: IFileStat | undefined, _targetIndex: number | undefined, _targetSector: ListViewTargetSector | undefined, _originalEvent: DragEvent): boolean {
+		return !!this.getRoot();
 	}
 
 	async drop(data: IDragAndDropData, targetElement: IFileStat | undefined, _targetIndex: number | undefined, _targetSector: ListViewTargetSector | undefined, originalEvent: DragEvent): Promise<void> {
-		originalEvent.preventDefault();
-		originalEvent.stopPropagation();
 		const root = this.getRoot();
 		if (!root) {
 			return;

@@ -232,45 +232,6 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		return this.createLearnerEntry(path, 'directory', root);
 	}
 
-	deleteLearnerResource(resource: ICodeScrimWorkspaceResource): Promise<boolean> {
-		const operation = ++this.operationVersion;
-		this.timer.clear();
-		return this.operations.queue(async () => {
-			if (!this.isLearnerCreated(resource)) {
-				return false;
-			}
-			if (this._state.status === 'playing') {
-				await this.doPause(operation);
-			}
-
-			const prefix = resource.path ? `${resource.path}/` : '';
-			const deleted: ICodeScrimWorkspaceResource[] = [];
-			for (const [key, entry] of this.learnerCreatedEntries) {
-				if (entry.resource.root === resource.root && (entry.resource.path === resource.path || (prefix && entry.resource.path.startsWith(prefix)))) {
-					deleted.push(entry.resource);
-					this.learnerCreatedEntries.delete(key);
-				}
-			}
-
-			await this.removeResourceTree(resource);
-			await this.learnerWorkspaceService.applyWorkspaceChanges(deleted, []);
-
-			if (this._activeResource && (this._activeResource.root === resource.root && (this._activeResource.path === resource.path || (prefix && this._activeResource.path.startsWith(prefix))))) {
-				const fallback = this.workspaceEntries.find(entry => entry.type === 'file' && entry.text && entry.resource.root === resource.root)
-					?? this.workspaceEntries.find(entry => entry.type === 'file' && entry.text);
-				if (fallback) {
-					await this.showResource(fallback.resource, operation);
-				} else {
-					this._activeResource = undefined;
-					this.replayActiveResource = undefined;
-				}
-			}
-
-			this._onDidChangeWorkspace.fire();
-			return true;
-		});
-	}
-
 	synchronizeLearnerWorkspace(): Promise<void> {
 		const operation = ++this.operationVersion;
 		this.timer.clear();

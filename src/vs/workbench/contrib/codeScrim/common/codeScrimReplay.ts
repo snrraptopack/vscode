@@ -303,7 +303,6 @@ export interface ICodeScrimReplayService {
 	openResource(resource: ICodeScrimWorkspaceResource): Promise<void>;
 	createLearnerFile(path: string, root?: number): Promise<ICodeScrimWorkspaceResource>;
 	createLearnerFolder(path: string, root?: number): Promise<ICodeScrimWorkspaceResource>;
-	deleteLearnerResource(resource: ICodeScrimWorkspaceResource): Promise<boolean>;
 	synchronizeLearnerWorkspace(): Promise<void>;
 	isLearnerCreated(resource: ICodeScrimWorkspaceResource): boolean;
 	openLearnerExperiment(id: string): Promise<void>;

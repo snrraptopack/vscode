@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as DOM from '../../../../base/browser/dom.js';
 import { IIdentityProvider, IKeyboardNavigationLabelProvider, IListVirtualDelegate } from '../../../../base/browser/ui/list/list.js';
 import { IListAccessibilityProvider } from '../../../../base/browser/ui/list/listWidget.js';
 import { IAsyncDataSource, ITreeNode, ITreeRenderer, ITreeSorter } from '../../../../base/browser/ui/tree/tree.js';
@@ -11,7 +10,6 @@ import { IMouseEvent } from '../../../../base/browser/mouseEvent.js';
 import { IAction } from '../../../../base/common/actions.js';
 import { getErrorMessage } from '../../../../base/common/errors.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
-import { isMacintosh } from '../../../../base/common/platform.js';
 import { compareFileNames } from '../../../../base/common/comparers.js';
 import { dirname } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -131,17 +129,6 @@ export class CodeScrimLearnerFilesTree extends Disposable {
 			}
 		}));
 		this._register(this.tree.onContextMenu(event => this.showContextMenu(event.element, event.anchor)));
-		this._register(this.tree.onKeyDown(event => {
-			if (event.code === 'Delete' || (isMacintosh && event.code === 'Backspace' && event.metaKey)) {
-				const focus = this.tree.getFocus()[0];
-				if (focus) {
-					void this.delete(focus);
-				}
-			}
-		}));
-		this._register(DOM.addDisposableListener(container, DOM.EventType.DRAG_OVER, event => {
-			event.stopPropagation();
-		}));
 	}
 
 	async refresh(): Promise<void> {
@@ -183,60 +170,28 @@ export class CodeScrimLearnerFilesTree extends Disposable {
 		}
 	}
 
-	async delete(element: IFileStat): Promise<void> {
-		const resource = this.learnerWorkspaceService.toWorkspaceResource(element.resource);
-		if (!resource) {
-			return;
-		}
-		if (!this.replayService.isLearnerCreated(resource)) {
-			this.notificationService.warn(localize('codeScrim.instructorFileDeleteBlocked', "Instructor files cannot be deleted."));
-			return;
-		}
-		try {
-			await this.replayService.deleteLearnerResource(resource);
-			await this.refresh();
-		} catch (error) {
-			this.notificationService.error(localize('codeScrim.deleteLearnerEntryFailed', "Unable to delete the learner file or folder: {0}", getErrorMessage(error)));
-		}
-	}
-
 	layout(height: number, width: number): void {
 		this.tree.layout(height, width);
 	}
 
 	private showContextMenu(element: IFileStat | null, anchor: HTMLElement | IMouseEvent): void {
-		const resource = element ? this.learnerWorkspaceService.toWorkspaceResource(element.resource) : undefined;
-		const isLearnerCreated = resource && this.replayService.isLearnerCreated(resource);
-		const actions: IAction[] = [{
-			id: 'codescrim.newLearnerFile',
-			label: localize('codeScrim.newLearnerFile', "New File"),
-			tooltip: '',
-			class: undefined,
-			enabled: true,
-			run: () => this.create('file', element ?? undefined),
-		}, {
-			id: 'codescrim.newLearnerFolder',
-			label: localize('codeScrim.newLearnerFolder', "New Folder"),
-			tooltip: '',
-			class: undefined,
-			enabled: true,
-			run: () => this.create('directory', element ?? undefined),
-		}];
-
-		if (element) {
-			actions.push({
-				id: 'codescrim.deleteLearnerEntry',
-				label: localize('codeScrim.deleteLearnerEntry', "Delete"),
-				tooltip: '',
-				class: undefined,
-				enabled: isLearnerCreated ?? false,
-				run: () => this.delete(element),
-			});
-		}
-
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => anchor,
-			getActions: () => actions,
+			getActions: (): IAction[] => [{
+				id: 'codescrim.newLearnerFile',
+				label: localize('codeScrim.newLearnerFile', "New File"),
+				tooltip: '',
+				class: undefined,
+				enabled: true,
+				run: () => this.create('file', element ?? undefined),
+			}, {
+				id: 'codescrim.newLearnerFolder',
+				label: localize('codeScrim.newLearnerFolder', "New Folder"),
+				tooltip: '',
+				class: undefined,
+				enabled: true,
+				run: () => this.create('directory', element ?? undefined),
+			}],
 		});
 	}
 
