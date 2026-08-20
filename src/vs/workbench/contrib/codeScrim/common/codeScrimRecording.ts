@@ -5,6 +5,7 @@
 
 import { Event } from '../../../../base/common/event.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { ICodeScrimNarrationTrack } from './codeScrimNarration.js';
 import { CodeScrimTerminalEventData, CodeScrimTerminalState, ICodeScrimTerminalCheckpoint } from './codeScrimTerminal.js';
 
 export const CODE_SCRIM_START_RECORDING_COMMAND_ID = 'codescrim.startRecording';
@@ -115,6 +116,7 @@ export interface ICodeScrimRecordingDraft {
 	readonly duration: number;
 	readonly checkpoints: readonly ICodeScrimRecordingCheckpoint[];
 	readonly events: readonly CodeScrimRecordingEvent[];
+	readonly narration?: ICodeScrimNarrationTrack;
 }
 
 export type CodeScrimRecordingState =
@@ -166,6 +168,10 @@ export class CodeScrimRecordingBuffer {
 
 	get isPaused(): boolean {
 		return this.pausedAt !== undefined;
+	}
+
+	position(now: number): number {
+		return this.draftId ? this.toMicroseconds(now) : 0;
 	}
 
 	start(draftId: string, now: number): void {

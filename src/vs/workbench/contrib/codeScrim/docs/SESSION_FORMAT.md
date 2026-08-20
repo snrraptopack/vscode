@@ -6,7 +6,7 @@ The CodeScrim package is the portable product asset. It must be deterministic, s
 
 ## Container
 
-The implemented `.scrim` v4 format is an opaque binary envelope:
+The implemented `.scrim` v5 format is an opaque binary envelope:
 
 ```text
 magic bytes: CODESCRM
@@ -81,6 +81,8 @@ The first editor schema uses these version-1 event kinds:
 The first workspace schema uses `workspace.entriesChanged`. Its payload atomically removes zero or more portable workspace resources and introduces zero or more directory/file entries. File entries carry base64 bytes in the in-memory draft; the package writer will move those bytes into content-addressed blobs.
 
 The first terminal schema records lifecycle, active terminal, raw ANSI output, semantic input, dimensions, title, exit state, and shell-integration command boundaries. A command boundary carries its stable ID, terminal, command line, confidence, trust flag, working directory, start/end timestamps, and optional exit code. Passive replay renders only the PTY output stream so shell echo is not duplicated. Terminal checkpoints store the accumulated presentation stream in content-addressed blobs. Replaying or seeking never creates a shell and never forwards recorded input or command lines to the host.
+
+Narration is an optional media track made of self-contained encoded audio segments. Every segment stores its microsecond start, active-timeline duration, MIME type, and a content-addressed audio blob. Pausing closes the current segment and resuming opens another at the same monotonic CodeScrim clock position, so time spent paused is neither recorded nor represented as silence. A recording remains valid when microphone access is unavailable or denied.
 
 The learner timeline derives terminal activity from those command boundaries. Nearby commands collapse into quiet clusters, the activity layer appears only while the native Terminal panel is visible, and command text is revealed only through hover or the selected cluster inspector. Learner experiment markers remain the primary persistent timeline markers.
 

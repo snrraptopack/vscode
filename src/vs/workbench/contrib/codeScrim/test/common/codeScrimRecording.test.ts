@@ -258,8 +258,10 @@ suite('CodeScrimRecordingBuffer', () => {
 		buffer.append({ domain: 'editor', kind: 'editor.activeResourceChanged', payload: {} }, 110);
 
 		assert.strictEqual(buffer.pause(115), true);
+		assert.strictEqual(buffer.position(120), 15_000);
 		assert.strictEqual(buffer.pause(120), false);
 		assert.strictEqual(buffer.resume(145), true);
+		assert.strictEqual(buffer.position(145), 15_000);
 		const resumed = buffer.append({ domain: 'editor', kind: 'editor.activeResourceChanged', payload: {} }, 150);
 		const draft = buffer.stop(160);
 

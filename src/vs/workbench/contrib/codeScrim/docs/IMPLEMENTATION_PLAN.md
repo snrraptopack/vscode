@@ -94,6 +94,8 @@ Current vertical-slice note: record, stop, recovery across restart, encrypted sa
 
 - Create a lesson-scoped native browser editor.
 - Record and replay navigation, viewport, console, network, and selected browser state through browser model/CDP services.
+- Keep passive recorded browser presentation separate from a learner's live browser: opening or seeking a recording must not start the instructor's server or issue recorded network requests.
+- Connect the interactive learner browser only to explicitly started learner execution, with detected ports and provider capabilities determining how local addresses are exposed.
 - Integrate native DevTools.
 
 Acceptance criteria:
@@ -110,6 +112,8 @@ Acceptance criteria:
 - Preserve the learner editor's recorded caret and active-line presentation when the native terminal panel opens or terminal replay begins. The current panel transition can make the editor appear to jump back to the start of the line.
 - [x] Provide a real learner terminal rooted in the disposable learner workspace, created only by explicit learner action and kept separate from read-only instructor terminal replay.
 - Capture debug lifecycle, breakpoints, focus, stack, variables, REPL, and relevant errors.
+- Present recorded instructor debug state as deterministic, read-only replay without launching the original debug adapter or program.
+- Keep learner debugging as a separate live session against learner files and an explicitly prepared execution environment.
 - Define runnable checkpoints for exercises that require live debug state.
 
 Acceptance criteria:
@@ -120,10 +124,12 @@ Acceptance criteria:
 
 ## Milestone 5: Recording and narration
 
-- Add native recording orchestration and one monotonic clock.
-- Add cross-platform audio capture.
-- Write chunked events and periodic checkpoints while recording.
-- Recover a valid draft after a crash.
+- [x] Add native recording orchestration and one monotonic clock.
+- [x] Add an initial cross-platform microphone capture and synchronized replay path.
+- [x] Write chunked events and periodic checkpoints while recording.
+- [x] Recover the latest stopped draft after a restart.
+- Persist active audio chunks during recording so an interrupted narration can also be recovered.
+- Add microphone selection, input-level feedback, mute, and narration-volume controls.
 - Add chapter and checkpoint markers during recording.
 
 Acceptance criteria:
@@ -134,10 +140,12 @@ Acceptance criteria:
 
 ## Milestone 6: Package, session editing, and exercises
 
-- Implement the v2 package reader/writer and integrity validation.
+- [x] Implement the current pre-release v5 package reader/writer, encryption, and integrity validation.
 - Add trimming, chapter editing, notes, exercises, and checkpoint editing.
+- Support removing unwanted timeline ranges, splitting a recording into lessons, replacing narration, and saving named session revisions without requiring a complete re-record.
+- Regenerate affected timeline positions and indexed checkpoints after structural edits, and reject edits whose file/event dependencies cannot produce a deterministic session.
 - Add exercise validation hooks without coupling the package to a single language.
-- Add v1 prototype import as a migration tool.
+- Keep obsolete pre-release package schemas unsupported; add migration only after a public compatibility promise exists.
 
 ## Milestone 7: Secure learner execution
 

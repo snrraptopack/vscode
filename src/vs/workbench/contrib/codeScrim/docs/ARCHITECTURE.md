@@ -128,7 +128,10 @@ Validates manifests, streams event chunks and media, verifies hashes, and perfor
 
 - One monotonic session clock timestamps audio and IDE events.
 - Audio capture is a native product service, not a hidden webview.
-- The platform implementation may use a small signed sidecar when Electron does not expose a reliable cross-platform recording API.
+- The first desktop implementation uses Electron's inherited `getUserMedia` and `MediaRecorder` support and stores an independently decodable segment for each active recording interval.
+- Replay decodes narration through a product-owned `AudioContext`, corrects meaningful drift against replay position, and pauses or seeks with the rest of the lesson.
+- CodeScrim deliberately does not depend on Chat Voice Mode: that path produces speech-service PCM, while lesson narration needs portable encoded media.
+- Device selection, input-level UI, narration replacement, crash-safe live chunk persistence, and any future signed native sidecar remain later audio layers.
 
 ## Native UI composition
 

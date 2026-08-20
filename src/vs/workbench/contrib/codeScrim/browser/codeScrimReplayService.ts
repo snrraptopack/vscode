@@ -15,12 +15,14 @@ import { ILanguageService } from '../../../../editor/common/languages/language.j
 import { EndOfLineSequence, ITextModel } from '../../../../editor/common/model.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { localize } from '../../../../nls.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
+import { CodeScrimNarrationPlayback } from './codeScrimNarrationPlayback.js';
 import { CodeScrimTerminalReplay } from './codeScrimTerminalReplay.js';
 
 const REPLAY_TICK_INTERVAL = 16;
@@ -31,6 +33,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 	private readonly cursor = new CodeScrimReplayCursor();
 	private readonly terminalReplay = this._register(new CodeScrimTerminalReplay());
+	private readonly narrationPlayback: CodeScrimNarrationPlayback;
 	private readonly learnerOverlays = new CodeScrimLearnerOverlayStore();
 	private readonly operations = new Sequencer();
 	private readonly models = this._register(new DisposableMap<string, ITextModel>());
@@ -101,11 +104,13 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	constructor(
 		@IEditorService private readonly editorService: IEditorService,
 		@ILanguageService private readonly languageService: ILanguageService,
+		@ILogService logService: ILogService,
 		@IModelService private readonly modelService: IModelService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@ICodeScrimLearnerWorkspaceService private readonly learnerWorkspaceService: ICodeScrimLearnerWorkspaceService,
 	) {
 		super();
+		this.narrationPlayback = this._register(new CodeScrimNarrationPlayback(logService));
 	}
 
 	async replay(draft: ICodeScrimRecordingDraft): Promise<boolean> {
@@ -156,6 +161,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this.ticking = false;
 		this._terminalCommands = [];
 		this.terminalReplay.reset();
+		this.narrationPlayback.clear();
 		this.publishIdle();
 		void this.operations.queue(async () => {
 			await this.captureLearnerExperiment(stoppedPosition);
@@ -400,6 +406,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		}
 
 		try {
+			this.narrationPlayback.clear();
 			this.learnerOverlays.clear();
 			this.learnerCreatedEntries.clear();
 			this._learnerExperiments = [];
@@ -416,6 +423,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
 			this.activeDraft = draft;
+			this.narrationPlayback.load(draft.narration);
 			this._terminalCommands = collectCodeScrimTerminalCommands(draft.events);
 			this.publish('preparing', 0);
 			await this.prepareWorkspace(draft, draft.checkpoints[0]);
@@ -1128,6 +1136,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			appliedEventCount: this.cursor.appliedEventCount,
 			totalEventCount: this.cursor.totalEventCount,
 		});
+		this.narrationPlayback.update(this._state);
 		this._onDidChangeState.fire(this._state);
 	}
 
@@ -1146,6 +1155,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				totalEventCount: this.cursor.totalEventCount,
 				error: message,
 			});
+			this.narrationPlayback.update(this._state);
 			this._onDidChangeState.fire(this._state);
 		}
 		this.notificationService.error(localize('codeScrim.replayFailed', "CodeScrim replay failed: {0}", message));
@@ -1153,6 +1163,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 	private publishIdle(): void {
 		this._state = Object.freeze({ status: 'idle' });
+		this.narrationPlayback.update(this._state);
 		this._onDidChangeState.fire(this._state);
 	}
 

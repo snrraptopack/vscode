@@ -6,6 +6,7 @@
 import { decodeBase64, encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { URI } from '../../../../base/common/uri.js';
+import { ICodeScrimNarrationSegment, ICodeScrimNarrationTrack } from './codeScrimNarration.js';
 import { CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
 import { ICodeScrimTerminalCheckpoint } from './codeScrimTerminal.js';
 
@@ -14,7 +15,7 @@ export const CODE_SCRIM_OPEN_RECORDING_COMMAND_ID = 'codescrim.openRecording';
 export const CODE_SCRIM_PACKAGE_EXTENSION = 'scrim';
 
 const PACKAGE_MAGIC = new Uint8Array([0x43, 0x4f, 0x44, 0x45, 0x53, 0x43, 0x52, 0x4d]); // CODESCRM
-const PACKAGE_MAJOR_VERSION = 4;
+const PACKAGE_MAJOR_VERSION = 5;
 const PACKAGE_MINOR_VERSION = 0;
 const PACKAGE_HEADER_LENGTH_BYTES = 4;
 const PACKAGE_MAX_HEADER_BYTES = 16 * 1024;
@@ -23,6 +24,7 @@ const PACKAGE_MAX_EXPANDED_BYTES = 512 * 1024 * 1024;
 const PACKAGE_MAX_EVENT_COUNT = 2_000_000;
 const PACKAGE_MAX_ENTRY_COUNT = 100_000;
 const PACKAGE_MAX_CHECKPOINT_COUNT = 10_000;
+const PACKAGE_MAX_NARRATION_SEGMENT_COUNT = 10_000;
 const PACKAGE_EVENT_CHUNK_SIZE = 500;
 const PACKAGE_KEY_ALGORITHM = 'AES-GCM';
 const PACKAGE_IV_LENGTH = 12;
@@ -59,6 +61,10 @@ interface ICodeScrimEventChunk {
 	readonly eventCount: number;
 }
 
+interface ICodeScrimPackagedNarrationSegment extends Omit<ICodeScrimNarrationSegment, 'data'> {
+	readonly dataBlob: string;
+}
+
 interface ICodeScrimPackagedCheckpoint {
 	readonly timestamp: number;
 	readonly eventIndex: number;
@@ -74,13 +80,14 @@ interface ICodeScrimPackagedCheckpoint {
 interface ICodeScrimPackagePayload {
 	readonly manifest: {
 		readonly format: 'codescrim-session';
-		readonly schemaVersion: 4;
+		readonly schemaVersion: 5;
 		readonly sessionId: string;
 		readonly duration: number;
 		readonly timebase: 'microseconds';
 		readonly eventCount: number;
 		readonly checkpoints: readonly ICodeScrimPackagedCheckpoint[];
 		readonly eventChunks: readonly ICodeScrimEventChunk[];
+		readonly narration?: { readonly segments: readonly ICodeScrimPackagedNarrationSegment[] };
 	};
 	readonly blobs: Readonly<Record<string, string>>;
 }
@@ -231,17 +238,26 @@ export class CodeScrimPackageCodec {
 				eventCount: events.length,
 			});
 		}
+		const narration = draft.narration ? {
+			segments: await Promise.all(draft.narration.segments.map(async segment => ({
+				start: segment.start,
+				duration: segment.duration,
+				mimeType: segment.mimeType,
+				dataBlob: await storeBlob(decodeBase64(segment.data).buffer),
+			}))),
+		} : undefined;
 
 		return {
 			manifest: {
 				format: 'codescrim-session',
-				schemaVersion: 4,
+				schemaVersion: 5,
 				sessionId: draft.id,
 				duration: draft.duration,
 				timebase: 'microseconds',
 				eventCount: draft.events.length,
 				checkpoints,
 				eventChunks,
+				...(narration ? { narration } : {}),
 			},
 			blobs,
 		};
@@ -315,7 +331,21 @@ export class CodeScrimPackageCodec {
 			throw new Error('The CodeScrim event index is incomplete.');
 		}
 
-		return { id: payload.manifest.sessionId, duration: payload.manifest.duration, checkpoints, events };
+		let narration: ICodeScrimNarrationTrack | undefined;
+		if (payload.manifest.narration) {
+			const segments: ICodeScrimNarrationSegment[] = [];
+			for (const segment of payload.manifest.narration.segments) {
+				segments.push({
+					start: segment.start,
+					duration: segment.duration,
+					mimeType: segment.mimeType,
+					data: encodeBase64(await readBlob(segment.dataBlob)),
+				});
+			}
+			narration = { segments };
+		}
+
+		return { id: payload.manifest.sessionId, duration: payload.manifest.duration, checkpoints, events, ...(narration ? { narration } : {}) };
 	}
 
 	private readHeader(packageBytes: VSBuffer): { readonly header: ICodeScrimPackageHeader; readonly encrypted: Uint8Array } {
@@ -384,12 +414,25 @@ function parseHeader(candidate: unknown): ICodeScrimPackageHeader {
 
 function parsePayload(candidate: unknown): ICodeScrimPackagePayload {
 	if (!isRecord(candidate) || !isRecord(candidate.manifest) || candidate.manifest.format !== 'codescrim-session' ||
-		candidate.manifest.schemaVersion !== 4 || typeof candidate.manifest.sessionId !== 'string' || !candidate.manifest.sessionId ||
+		candidate.manifest.schemaVersion !== 5 || typeof candidate.manifest.sessionId !== 'string' || !candidate.manifest.sessionId ||
 		!isSafeInteger(candidate.manifest.duration) || candidate.manifest.duration < 0 || candidate.manifest.timebase !== 'microseconds' ||
 		!isSafeInteger(candidate.manifest.eventCount) || candidate.manifest.eventCount < 0 || candidate.manifest.eventCount > PACKAGE_MAX_EVENT_COUNT ||
 		!Array.isArray(candidate.manifest.checkpoints) || !candidate.manifest.checkpoints.length || candidate.manifest.checkpoints.length > PACKAGE_MAX_CHECKPOINT_COUNT ||
 		!Array.isArray(candidate.manifest.eventChunks) || !isRecord(candidate.blobs)) {
 		throw new Error('The CodeScrim package manifest is invalid.');
+	}
+	if (candidate.manifest.narration !== undefined) {
+		if (!isRecord(candidate.manifest.narration) || !Array.isArray(candidate.manifest.narration.segments) ||
+			candidate.manifest.narration.segments.length > PACKAGE_MAX_NARRATION_SEGMENT_COUNT) {
+			throw new Error('The CodeScrim narration index is invalid.');
+		}
+		for (const segment of candidate.manifest.narration.segments) {
+			if (!isRecord(segment) || !isSafeInteger(segment.start) || segment.start < 0 ||
+				!isSafeInteger(segment.duration) || segment.duration <= 0 || typeof segment.mimeType !== 'string' ||
+				!segment.mimeType.startsWith('audio/') || typeof segment.dataBlob !== 'string' || !segment.dataBlob) {
+				throw new Error('The CodeScrim narration index is invalid.');
+			}
+		}
 	}
 	for (const checkpoint of candidate.manifest.checkpoints) {
 		if (!isRecord(checkpoint) || !isSafeInteger(checkpoint.timestamp) || checkpoint.timestamp < 0 ||
@@ -450,6 +493,21 @@ function validateDraft(draft: ICodeScrimRecordingDraft): void {
 		validateEventPayload(event);
 		previousSequence = event.sequence;
 		previousTimestamp = event.timestamp;
+	}
+
+	if (draft.narration) {
+		if (!Array.isArray(draft.narration.segments) || draft.narration.segments.length > PACKAGE_MAX_NARRATION_SEGMENT_COUNT) {
+			throw new Error('The CodeScrim narration track is invalid.');
+		}
+		let previousEnd = 0;
+		for (const segment of draft.narration.segments) {
+			if (!isSafeInteger(segment.start) || segment.start < previousEnd || !isSafeInteger(segment.duration) || segment.duration <= 0 ||
+				segment.start + segment.duration > draft.duration || typeof segment.mimeType !== 'string' || !segment.mimeType.startsWith('audio/') ||
+				typeof segment.data !== 'string' || !segment.data) {
+				throw new Error('The CodeScrim narration track is invalid.');
+			}
+			previousEnd = segment.start + segment.duration;
+		}
 	}
 }
 

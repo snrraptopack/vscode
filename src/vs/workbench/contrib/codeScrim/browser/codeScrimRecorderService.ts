@@ -18,12 +18,15 @@ import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uri
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { localize } from '../../../../nls.js';
 import { EditorResourceAccessor, SideBySideEditor } from '../../../common/editor.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
 import { ITerminalService } from '../../terminal/browser/terminal.js';
 import { ICodeScrimPackageService } from '../common/codeScrimPackage.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEventData, CodeScrimRecordingState, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
+import { CodeScrimNarrationCapture } from './codeScrimNarrationCapture.js';
 import { CodeScrimTerminalRecorder } from './codeScrimTerminalRecorder.js';
 
 const MAX_CHECKPOINT_FILE_SIZE = 2 * 1024 * 1024;
@@ -43,6 +46,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 
 	private readonly buffer = new CodeScrimRecordingBuffer();
 	private readonly terminalRecorder: CodeScrimTerminalRecorder;
+	private readonly narrationCapture: CodeScrimNarrationCapture;
 	private readonly recordingListeners = this._register(new MutableDisposable<DisposableStore>());
 	private readonly recordingStatus = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
 	private readonly stopRecordingStatus = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
@@ -68,7 +72,9 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		@ICodeEditorService private readonly codeEditorService: ICodeEditorService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IFileService private readonly fileService: IFileService,
+		@ILogService private readonly logService: ILogService,
 		@IModelService private readonly modelService: IModelService,
+		@INotificationService notificationService: INotificationService,
 		@ICodeScrimPackageService private readonly packageService: ICodeScrimPackageService,
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
 		@ITextFileService private readonly textFileService: ITextFileService,
@@ -78,6 +84,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 	) {
 		super();
 		this.terminalRecorder = new CodeScrimTerminalRecorder(terminalService, event => this.append(event));
+		this.narrationCapture = this._register(new CodeScrimNarrationCapture(notificationService, logService));
 		this.syncStatusbar();
 	}
 
@@ -109,10 +116,15 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 					entries.push(...await this.snapshotEntry(child, budget, true));
 				}
 			}
+			const narrationReady = await this.narrationCapture.prepare();
 
 			// Timeline zero begins only after preparation. Snapshot I/O is not instructor activity and
 			// must never become a blank delay at the beginning of every replay.
-			this.buffer.start(draftId, this.now());
+			const startedAt = this.now();
+			this.buffer.start(draftId, startedAt);
+			if (narrationReady) {
+				this.narrationCapture.startSegment(0);
+			}
 			for (const entry of entries) {
 				this.buffer.captureWorkspaceEntry(entry);
 				this.knownWorkspaceResources.add(CodeScrimRecordingBuffer.resourceKey(entry.resource));
@@ -127,6 +139,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 			this.publishState();
 			return true;
 		} catch (error) {
+			this.narrationCapture.discard();
 			if (this.buffer.isRecording) {
 				this.buffer.stop(this.now());
 			}
@@ -136,20 +149,24 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 	}
 
 	async pauseRecording(): Promise<boolean> {
-		if (!this.buffer.pause(this.now())) {
+		const now = this.now();
+		if (!this.buffer.pause(now)) {
 			return false;
 		}
 		this.recordingListeners.clear();
 		await this.pendingWorkspaceChanges;
-		this.buffer.captureCheckpoint(this.now());
+		await this.pauseNarration(this.buffer.position(now));
+		this.buffer.captureCheckpoint(now);
 		this.publishState();
 		return true;
 	}
 
 	resumeRecording(): boolean {
-		if (!this.buffer.resume(this.now())) {
+		const now = this.now();
+		if (!this.buffer.resume(now)) {
 			return false;
 		}
+		this.narrationCapture.startSegment(this.buffer.position(now));
 		// Listeners are recreated because pause intentionally detached every event source.
 		this.recordingListeners.value = this.createRecordingListeners(false);
 		this.recordActiveResource();
@@ -165,7 +182,10 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		this.recordingListeners.clear();
 		this.recordingStatus.clear();
 		await this.pendingWorkspaceChanges;
-		const draft = this.buffer.stop(this.now());
+		const now = this.now();
+		const stoppedDraft = this.buffer.stop(now);
+		const narration = stoppedDraft ? await this.finishNarration(stoppedDraft.duration) : undefined;
+		const draft = stoppedDraft && narration ? Object.freeze({ ...stoppedDraft, narration }) : stoppedDraft;
 		if (draft) {
 			this._lastDraft = draft;
 			this._onDidChangeDraft.fire(draft);
@@ -176,6 +196,25 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 			await this.packageService.saveDraft(draft);
 		}
 		return draft;
+	}
+
+	private async pauseNarration(position: number): Promise<void> {
+		try {
+			await this.narrationCapture.pause(position);
+		} catch (error) {
+			this.logService.error('[CodeScrim] Failed to pause narration capture.', error);
+			this.narrationCapture.discard();
+		}
+	}
+
+	private async finishNarration(position: number) {
+		try {
+			return await this.narrationCapture.finish(position);
+		} catch (error) {
+			this.logService.error('[CodeScrim] Failed to finalize narration capture.', error);
+			this.narrationCapture.discard();
+			return undefined;
+		}
 	}
 
 	async discardLastDraft(): Promise<boolean> {

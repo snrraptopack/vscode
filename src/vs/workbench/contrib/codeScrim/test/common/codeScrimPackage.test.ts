@@ -25,7 +25,7 @@ suite('CodeScrimPackageCodec', () => {
 			decoded,
 			plaintextVisible: encoded.toString().includes('private source text'),
 		}, {
-			header: { packageId: 'package-test', keyId: 'author-key', major: 4, minor: 0 },
+			header: { packageId: 'package-test', keyId: 'author-key', major: 5, minor: 0 },
 			decoded: draft,
 			plaintextVisible: false,
 		});
@@ -93,6 +93,9 @@ function createDraft(): ICodeScrimRecordingDraft {
 	return {
 		id: 'package-test',
 		duration: 4_000,
+		narration: {
+			segments: [{ start: 500, duration: 1_000, mimeType: 'audio/webm;codecs=opus', data: 'dm9pY2U=' }],
+		},
 		checkpoints: [{
 			timestamp: 0,
 			eventIndex: 0,
