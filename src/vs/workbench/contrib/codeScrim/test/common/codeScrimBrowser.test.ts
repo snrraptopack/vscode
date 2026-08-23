@@ -32,4 +32,21 @@ suite('CodeScrimBrowser', () => {
 			findCodeScrimBrowserFrame(track, 600)?.data,
 		], [undefined, 'one-a', 'one-b', undefined, 'two-a']);
 	});
+
+	test('falls back to the most recent recorded frame when the visible page has none yet', () => {
+		const track: ICodeScrimBrowserTrack = {
+			frames: [
+				{ timestamp: 100, pageId: 'one', url: 'http://one', title: 'One', mimeType: 'image/jpeg', data: 'one-a' },
+				{ timestamp: 300, pageId: 'one', url: 'http://one', title: 'One', mimeType: 'image/jpeg', data: 'one-b' },
+			],
+			visibility: [
+				{ timestamp: 50, pageId: 'one', visible: true },
+				{ timestamp: 400, pageId: 'one', visible: false },
+				{ timestamp: 420, pageId: 'two', visible: true },
+			],
+		};
+
+		assert.strictEqual(findCodeScrimBrowserFrame(track, 430)?.data, 'one-b');
+		assert.strictEqual(findCodeScrimBrowserFrame(track, 25), undefined);
+	});
 });

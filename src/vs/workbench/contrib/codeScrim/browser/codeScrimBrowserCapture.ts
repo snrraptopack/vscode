@@ -5,6 +5,7 @@
 
 import { mainWindow } from '../../../../base/browser/window.js';
 import { encodeBase64 } from '../../../../base/common/buffer.js';
+import { hash } from '../../../../base/common/hash.js';
 import { Disposable, DisposableMap, DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
@@ -22,7 +23,8 @@ export class CodeScrimBrowserCapture extends Disposable {
 	private readonly frames: ICodeScrimBrowserFrame[] = [];
 	private readonly visibility: ICodeScrimBrowserVisibility[] = [];
 	private readonly visiblePages = new Map<string, boolean>();
-	private readonly lastFrame = new Map<string, Pick<ICodeScrimBrowserFrame, 'data' | 'url' | 'title'>>();
+	/** Deduplication state per page. Only a cheap content hash is retained, never the frame payload. */
+	private readonly lastFrame = new Map<string, { url: string; title: string; dataHash: number }>();
 	private position: (() => number) | undefined;
 	private active = false;
 	private generation = 0;
@@ -150,21 +152,27 @@ export class CodeScrimBrowserCapture extends Disposable {
 		this.timer.value = toDisposable(() => mainWindow.clearInterval(handle));
 	}
 
-	private async captureVisiblePages(timestamp = this.position?.() ?? 0): Promise<void> {
+	private async captureVisiblePages(timestamp?: number): Promise<void> {
 		if (!this.active) {
 			return;
 		}
 		for (const input of this.browserViewService.getKnownBrowserViews().values()) {
 			const model = input.model;
 			if (model?.visible) {
-				this.recordVisibility(model, true, timestamp);
+				this.recordVisibility(model, true, timestamp ?? this.position?.() ?? 0);
 				this.capture(model, timestamp);
 			}
 		}
 		await this.waitForPendingCaptures();
 	}
 
-	private capture(model: IBrowserViewModel, timestamp = this.position?.() ?? 0, awaitNextPaint = false): void {
+	/**
+	 * Captures a frame of a visible page. When `timestamp` is given (pause and
+	 * finish boundaries) it pins the frame to that clock position; otherwise the
+	 * frame is stamped with the clock position at the moment the screenshot has
+	 * resolved, because pixels become ready after the request is issued.
+	 */
+	private capture(model: IBrowserViewModel, timestamp?: number, awaitNextPaint = false): void {
 		if (!this.active || !model.visible || this.capturingPages.has(model.id)) {
 			return;
 		}
@@ -176,20 +184,28 @@ export class CodeScrimBrowserCapture extends Disposable {
 				return;
 			}
 			const data = encodeBase64(screenshot);
+			const dataHash = hash(data);
 			const previous = this.lastFrame.get(model.id);
-			if (previous?.data === data && previous.url === model.url && previous.title === model.title) {
+			if (previous?.dataHash === dataHash && previous.url === model.url && previous.title === model.title) {
 				return;
 			}
+			// The screenshot resolved after the capture was requested, so stamp
+			// the frame with the clock position at the moment pixels were ready.
+			const capturedAt = Math.max(0, Math.round(timestamp ?? this.position?.() ?? 0));
+			const device = model.device;
 			const frame: ICodeScrimBrowserFrame = Object.freeze({
-				timestamp: Math.max(0, Math.round(timestamp)),
+				timestamp: capturedAt,
 				pageId: model.id,
 				url: model.url,
 				title: model.title,
 				mimeType: 'image/jpeg',
 				data,
+				zoomFactor: model.zoomFactor,
+				...(device?.width !== undefined ? { viewportWidth: device.width } : {}),
+				...(device?.height !== undefined ? { viewportHeight: device.height } : {}),
 			});
 			this.frames.push(frame);
-			this.lastFrame.set(model.id, frame);
+			this.lastFrame.set(model.id, { url: model.url, title: model.title, dataHash });
 		}, error => this.logService.warn('[CodeScrim] Could not capture an Integrated Browser frame.', error)).finally(() => {
 			this.pendingCaptures.delete(pending);
 			if (generation === this.generation) {

@@ -361,7 +361,10 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		};
 		const trailingScroll = listeners.add(new RunOnceScheduler(recordPendingScroll, 100));
 		listeners.add(editor.onDidScrollChange(event => {
-			if ((!event.scrollTopChanged && !event.scrollLeftChanged) || this.codeEditorService.getActiveCodeEditor() !== editor) {
+			// Scroll is recorded from every listened editor, not only the active
+			// one: instructors legitimately scroll a reference or diff pane beside
+			// the file they are editing, and that movement is part of the lesson.
+			if (!event.scrollTopChanged && !event.scrollLeftChanged) {
 				return;
 			}
 			const model = editor.getModel();

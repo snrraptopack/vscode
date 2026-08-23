@@ -15,6 +15,11 @@ export interface ICodeScrimBrowserFrame {
 	readonly title: string;
 	readonly mimeType: 'image/jpeg';
 	readonly data: string;
+	/** Page zoom when the frame was captured, so learners can match the instructor's layout. */
+	readonly zoomFactor?: number;
+	/** Emulated device viewport when device emulation was active during capture. */
+	readonly viewportWidth?: number;
+	readonly viewportHeight?: number;
 }
 
 /** Records whether an instructor browser page occupied the teaching surface. */
@@ -60,7 +65,12 @@ export function findCodeScrimBrowserFrame(track: ICodeScrimBrowserTrack | undefi
 			return frame;
 		}
 	}
-	return undefined;
+
+	// The visible page has no captured frame yet (for example it just became
+	// visible). Fall back to the most recent frame of any recorded page so the
+	// preview still shows the closest known instructor state instead of nothing.
+	const fallbackIndex = findLastTimestamp(track.frames, position);
+	return fallbackIndex >= 0 ? track.frames[fallbackIndex] : undefined;
 }
 
 function findLastTimestamp(entries: readonly { readonly timestamp: number }[], position: number): number {
