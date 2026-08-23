@@ -3,18 +3,21 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Limiter, Sequencer } from '../../../../base/common/async.js';
+import { Limiter, Sequencer, timeout } from '../../../../base/common/async.js';
 import { decodeBase64, encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
 import { dirname, extUri, joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
 import { IFileService, IFileStat } from '../../../../platform/files/common/files.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { collectCodeScrimWorkspaceRoots, ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
 import { CodeScrimRecordingBuffer, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 
 const ACTIVE_WORKSPACE_STORAGE_KEY = 'codeScrim.learnerWorkspace.activeRoot';
+const DELETE_MAX_ATTEMPTS = 5;
+const DELETE_RETRY_DELAY_MS = 150;
 
 /**
  * Projects an immutable recording checkpoint into CodeScrim-owned storage. The projection is a
@@ -45,6 +48,7 @@ export class CodeScrimLearnerWorkspaceService implements ICodeScrimLearnerWorksp
 	constructor(
 		@IEnvironmentService environmentService: IEnvironmentService,
 		@IFileService private readonly fileService: IFileService,
+		@ILogService private readonly logService: ILogService,
 		@IStorageService private readonly storageService: IStorageService,
 	) {
 		this.baseRoot = joinPath(environmentService.workspaceStorageHome, 'codescrim', 'learner-workspaces');
@@ -270,7 +274,23 @@ export class CodeScrimLearnerWorkspaceService implements ICodeScrimLearnerWorksp
 
 	private async deleteOwnedWorkspace(candidate: URI | undefined): Promise<void> {
 		if (candidate && !extUri.isEqual(candidate, this.baseRoot) && extUri.isEqualOrParent(candidate, this.baseRoot) && await this.fileService.exists(candidate)) {
-			await this.fileService.del(candidate, { recursive: true, useTrash: false });
+			// Language servers, watchers, and terminals release workspace handles asynchronously
+			// after editors close. On Windows an outstanding handle makes the recursive delete fail
+			// with EBUSY, so retry briefly. Cleanup is never allowed to fail a seek or replay stop:
+			// the stored root below is cleared either way, so a folder that stays behind is inert
+			// and the next reset no longer considers it owned state.
+			for (let attempt = 0; ; attempt++) {
+				try {
+					await this.fileService.del(candidate, { recursive: true, useTrash: false });
+					break;
+				} catch (error) {
+					if (attempt >= DELETE_MAX_ATTEMPTS - 1) {
+						this.logService.warn('[CodeScrim] Could not delete the previous learner workspace projection.', candidate.toString(), error);
+						break;
+					}
+					await timeout(DELETE_RETRY_DELAY_MS * 2 ** attempt);
+				}
+			}
 		}
 		this.storageService.remove(ACTIVE_WORKSPACE_STORAGE_KEY, StorageScope.WORKSPACE);
 		if (candidate && this._workspaceRoot && extUri.isEqual(candidate, this._workspaceRoot)) {
