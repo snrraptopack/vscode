@@ -8,6 +8,7 @@ import { IListAccessibilityProvider } from '../../../../base/browser/ui/list/lis
 import { IAsyncDataSource, ITreeNode, ITreeRenderer, ITreeSorter } from '../../../../base/browser/ui/tree/tree.js';
 import { IMouseEvent } from '../../../../base/browser/mouseEvent.js';
 import { IAction } from '../../../../base/common/actions.js';
+import { Sequencer } from '../../../../base/common/async.js';
 import { getErrorMessage } from '../../../../base/common/errors.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { compareFileNames } from '../../../../base/common/comparers.js';
@@ -84,12 +85,14 @@ class LearnerFileAccessibilityProvider implements IListAccessibilityProvider<IFi
 export class CodeScrimLearnerFilesTree extends Disposable {
 
 	private readonly tree: WorkbenchAsyncDataTree<URI, IFileStat>;
+	private readonly refreshOperations = new Sequencer();
 	private input: URI | undefined;
 
 	constructor(
 		container: HTMLElement,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
+		@IFileService private readonly fileService: IFileService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IQuickInputService private readonly quickInputService: IQuickInputService,
 		@IThemeService themeService: IThemeService,
@@ -131,12 +134,20 @@ export class CodeScrimLearnerFilesTree extends Disposable {
 		this._register(this.tree.onContextMenu(event => this.showContextMenu(event.element, event.anchor)));
 	}
 
-	async refresh(): Promise<void> {
+	refresh(): Promise<void> {
 		const root = this.learnerWorkspaceService.workspaceRoot;
 		if (!root) {
-			return;
+			this.input = undefined;
+			return Promise.resolve();
 		}
+		return this.refreshOperations.queue(() => this.refreshRoot(root));
+	}
+
+	private async refreshRoot(root: URI): Promise<void> {
 		try {
+			if (this.learnerWorkspaceService.workspaceRoot?.toString() !== root.toString() || !await this.fileService.exists(root)) {
+				return;
+			}
 			if (!this.input || this.input.toString() !== root.toString()) {
 				this.input = root;
 				await this.tree.setInput(root);
@@ -144,6 +155,14 @@ export class CodeScrimLearnerFilesTree extends Disposable {
 				await this.tree.updateChildren();
 			}
 		} catch (error) {
+			// Reset and Stop intentionally delete the projection. A refresh already in flight is
+			// stale in that case and must not turn normal cleanup into a learner-facing error.
+			if (this.learnerWorkspaceService.workspaceRoot?.toString() !== root.toString() || !await this.fileService.exists(root)) {
+				if (this.input?.toString() === root.toString()) {
+					this.input = undefined;
+				}
+				return;
+			}
 			this.notificationService.error(localize('codeScrim.refreshLearnerFilesFailed', "Unable to refresh learner files: {0}", getErrorMessage(error)));
 		}
 	}

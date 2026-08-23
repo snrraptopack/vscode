@@ -25,7 +25,7 @@ suite('CodeScrimPackageCodec', () => {
 			decoded,
 			plaintextVisible: encoded.toString().includes('private source text'),
 		}, {
-			header: { packageId: 'package-test', keyId: 'author-key', major: 5, minor: 0 },
+			header: { packageId: 'package-test', keyId: 'author-key', major: 6, minor: 0 },
 			decoded: draft,
 			plaintextVisible: false,
 		});
@@ -93,12 +93,18 @@ function createDraft(): ICodeScrimRecordingDraft {
 	return {
 		id: 'package-test',
 		duration: 4_000,
+		browser: {
+			frames: [{ timestamp: 750, pageId: 'page-1', url: 'http://localhost:3000', title: 'Lesson', mimeType: 'image/jpeg', data: '/9g=' }],
+			visibility: [{ timestamp: 500, pageId: 'page-1', visible: true }, { timestamp: 2_500, pageId: 'page-1', visible: false }],
+		},
 		narration: {
 			segments: [{ start: 500, duration: 1_000, mimeType: 'audio/webm;codecs=opus', data: 'dm9pY2U=' }],
 		},
 		checkpoints: [{
 			timestamp: 0,
 			eventIndex: 0,
+			activeResource: { root: 0, path: 'src/lesson.ts' },
+			scrollPosition: { scrollTop: 240.5, scrollLeft: 12 },
 			documents: [{
 				resource: { root: 0, path: 'src/lesson.ts' },
 				languageId: 'typescript',
@@ -137,24 +143,32 @@ function createDraft(): ICodeScrimRecordingDraft {
 		}, {
 			id: 'package-test:1',
 			version: 1,
-			timestamp: 1_500,
+			timestamp: 1_250,
 			sequence: 1,
+			domain: 'editor',
+			kind: 'editor.scrollChanged',
+			payload: { resource: { root: 0, path: 'src/lesson.ts' }, scrollTop: 360.25, scrollLeft: 0 },
+		}, {
+			id: 'package-test:2',
+			version: 1,
+			timestamp: 1_500,
+			sequence: 2,
 			domain: 'terminal',
 			kind: 'terminal.data',
 			payload: { terminalId: 1, data: '\u001b[32mready\u001b[0m' },
 		}, {
-			id: 'package-test:2',
+			id: 'package-test:3',
 			version: 1,
 			timestamp: 2_000,
-			sequence: 2,
+			sequence: 3,
 			domain: 'terminal',
 			kind: 'terminal.commandStarted',
 			payload: { terminalId: 1, terminalTitle: 'PowerShell', commandId: '1:test', command: 'npm test', cwd: 'C:\\lesson', commandLineConfidence: 'high', isTrusted: true },
 		}, {
-			id: 'package-test:3',
+			id: 'package-test:4',
 			version: 1,
 			timestamp: 3_500,
-			sequence: 3,
+			sequence: 4,
 			domain: 'terminal',
 			kind: 'terminal.commandFinished',
 			payload: { terminalId: 1, commandId: '1:test', cwd: 'C:\\lesson', exitCode: 0 },

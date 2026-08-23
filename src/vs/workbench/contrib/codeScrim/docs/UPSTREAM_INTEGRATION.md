@@ -22,8 +22,9 @@ CodeScrim remains a thin, explicit fork of VS Code. Normal upstream synchronizat
 | Upstream-owned file | Change | Reason | Expected conflict risk |
 |---|---|---|---|
 | `src/vs/workbench/workbench.desktop.main.ts` | One contribution import | Load native CodeScrim desktop workbench code | Low |
+| `src/vs/platform/browserView/electron-main/browserView.ts` | Explicitly dock BrowserView DevTools on the right | Keep an inspected lesson page and its native DevTools visible together for authoring and capture | Low |
 
-All other initial files are new CodeScrim-owned files.
+All other current product files are CodeScrim-owned files.
 
 Milestone 1 added only CodeScrim-owned files and did not widen the upstream integration surface.
 

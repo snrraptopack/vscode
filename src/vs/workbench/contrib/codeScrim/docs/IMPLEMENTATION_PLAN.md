@@ -44,7 +44,7 @@ Current vertical-slice note: the lesson editor now hosts the Milestone 2 recordi
 Status: in progress.
 
 - [x] Define the first v2 editor event contracts and append-only recording buffer.
-- [x] Add a native editor recording slice for model edits, active-file changes, selections, and saves.
+- [x] Add a native editor recording slice for model edits, active-file changes, selections, scrolling, and saves.
 - [x] Capture a bounded immutable workspace checkpoint plus unsaved document state.
 - [x] Record workspace file additions, updates, and deletions alongside editor events.
 - [x] Apply incremental model edits through isolated native Monaco models.
@@ -92,10 +92,13 @@ Current vertical-slice note: record, stop, recovery across restart, encrypted sa
 
 ## Milestone 3: Native browser integration
 
-- Create a lesson-scoped native browser editor.
-- Record and replay navigation, viewport, console, network, and selected browser state through browser model/CDP services.
+- [x] Add one-click instructor and learner entry points backed by the native Integrated Browser.
+- [x] Capture visible instructor browser frames and navigation metadata into encrypted, content-addressed packages.
+- [x] Replay the instructor's visual browser state without loading recorded URLs or executing page content.
+- Record structured viewport, console, network, scroll, and interaction metadata through browser model/CDP services.
 - Keep passive recorded browser presentation separate from a learner's live browser: opening or seeking a recording must not start the instructor's server or issue recorded network requests.
-- Connect the interactive learner browser only to explicitly started learner execution, with detected ports and provider capabilities determining how local addresses are exposed.
+- [x] Open the interactive learner browser only after an explicit My Preview action.
+- Connect My Preview to explicitly started learner execution, with detected ports and provider capabilities determining how local addresses are exposed.
 - Integrate native DevTools.
 
 Acceptance criteria:
@@ -140,7 +143,7 @@ Acceptance criteria:
 
 ## Milestone 6: Package, session editing, and exercises
 
-- [x] Implement the current pre-release v5 package reader/writer, encryption, and integrity validation.
+- [x] Implement the current pre-release v6 package reader/writer, encryption, and integrity validation.
 - Add trimming, chapter editing, notes, exercises, and checkpoint editing.
 - Support removing unwanted timeline ranges, splitting a recording into lessons, replacing narration, and saving named session revisions without requiring a complete re-record.
 - Regenerate affected timeline positions and indexed checkpoints after structural edits, and reject edits whose file/event dependencies cannot produce a deterministic session.
@@ -178,5 +181,8 @@ This milestone begins only after deterministic restore and learner overlays are 
 - Unit-test host-neutral format, clock, state-machine, and replay logic.
 - Use targeted workbench tests for editor/layout/service integration.
 - Use native UI smoke tests for course home, playback, pause/edit, seek, restore, browser, terminal, and debugger flows.
+- Enforce the recording-start, memory, browser-capture, packaging, and seek budgets in [PERFORMANCE.md](PERFORMANCE.md) against small projects and bounded monorepo fixtures.
+- Stream live events and media to a temporary content-addressed journal so recording memory is bounded by buffers rather than lesson duration.
+- Investigate the documented Windows development-build crash when Developer Tools opens during recording; do not attribute it without a symbolicated native dump.
 - Run layer validation when a new cross-layer import is introduced.
 - Avoid broad builds as a ritual; use the smallest validation that covers each change.

@@ -61,6 +61,8 @@ npm run stylelint -- --path src/vs/workbench/contrib/codeScrim/browser/media
 
 The host-neutral playback tests live at `test/common/codeScrimSession.test.ts`. Run them through the normal VS Code unit runner once client output has been compiled.
 
+Performance observations, budgets, benchmark dimensions, and the current Developer Tools crash investigation are tracked in [PERFORMANCE.md](PERFORMANCE.md). Development-build launch time must be measured separately from CodeScrim recording and replay overhead.
+
 ## Current workstation state
 
 The complete root and nested dependency lifecycle has been installed with npm. Electron `42.8.0`, its headers, built-in extensions, and the required Windows native bindings are present. A full `npm run compile` succeeds, and the native CodeScrim course and lesson editors have been smoke-tested in an isolated Code OSS development profile.

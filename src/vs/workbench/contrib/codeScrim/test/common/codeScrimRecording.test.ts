@@ -205,6 +205,22 @@ suite('CodeScrimRecordingBuffer', () => {
 		assert.strictEqual(draft?.checkpoints.at(-1)?.eventIndex, 2);
 	});
 
+	test('checkpoints the active editor scroll position', () => {
+		const buffer = new CodeScrimRecordingBuffer();
+		const resource = { root: 0, path: 'long-file.ts' };
+		buffer.start('draft-scroll', 0);
+		buffer.append({ domain: 'editor', kind: 'editor.activeResourceChanged', payload: { resource } }, 1);
+		buffer.append({
+			domain: 'editor',
+			kind: 'editor.scrollChanged',
+			payload: { resource, scrollTop: 480.5, scrollLeft: 24 },
+		}, 2);
+
+		const checkpoint = buffer.stop(3)?.checkpoints.at(-1);
+		assert.deepStrictEqual(checkpoint?.scrollPosition, { scrollTop: 480.5, scrollLeft: 24 });
+		assert.deepStrictEqual(checkpoint?.activeResource, resource);
+	});
+
 	test('checkpoints passive terminal output and dimensions', () => {
 		const buffer = new CodeScrimRecordingBuffer();
 		buffer.start('draft-terminal', 0);

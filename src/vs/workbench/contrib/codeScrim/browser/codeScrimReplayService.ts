@@ -19,6 +19,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
+import { findCodeScrimBrowserFrame } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
@@ -393,6 +394,9 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		if (activeResource && activeModel) {
 			surface.openResource(activeResource, activeModel);
 		}
+		surface.showBrowserFrame(this.activeDraft && this._state.status !== 'idle'
+			? findCodeScrimBrowserFrame(this.activeDraft.browser, this._state.position)
+			: undefined);
 		return toDisposable(() => {
 			if (this.surface === surface) {
 				this.surface = undefined;
@@ -493,6 +497,9 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				if (checkpoint.activeResource && checkpoint.selections?.length) {
 					this.surface?.applySelections(checkpoint.activeResource, checkpoint.selections);
 				}
+				if (checkpoint.activeResource && checkpoint.scrollPosition) {
+					this.surface?.applyScroll(checkpoint.activeResource, checkpoint.scrollPosition);
+				}
 			}
 			for (const event of this.cursor.advance(target)) {
 				if (!this.isCurrentOperation(operation)) {
@@ -555,6 +562,9 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				await this.activateReplayResource(initialResource, operation);
 				if (checkpoint.activeResource && checkpoint.selections?.length) {
 					this.surface?.applySelections(checkpoint.activeResource, checkpoint.selections);
+				}
+				if (checkpoint.activeResource && checkpoint.scrollPosition) {
+					this.surface?.applyScroll(checkpoint.activeResource, checkpoint.scrollPosition);
 				}
 			}
 			for (const event of this.cursor.advance(target)) {
@@ -660,6 +670,9 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			await this.activateReplayResource(initialResource, operation);
 			if (checkpoint.activeResource && checkpoint.selections?.length) {
 				this.surface?.applySelections(checkpoint.activeResource, checkpoint.selections);
+			}
+			if (checkpoint.activeResource && checkpoint.scrollPosition) {
+				this.surface?.applyScroll(checkpoint.activeResource, checkpoint.scrollPosition);
 			}
 		}
 		if (!this.isCurrentOperation(operation)) {
@@ -768,7 +781,9 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				break;
 			}
 			case 'editor.selectionChanged': {
-				await this.activateReplayResource(event.payload.resource, operation);
+				if (!this.isActiveResource(event.payload.resource)) {
+					await this.activateReplayResource(event.payload.resource, operation);
+				}
 				if (!this.isCurrentOperation(operation)) {
 					break;
 				}
@@ -776,6 +791,15 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				// returned as the active workbench editor. Route presentation through the
 				// attached replay surface instead of guessing through global editor state.
 				this.surface?.applySelections(event.payload.resource, event.payload.selections);
+				break;
+			}
+			case 'editor.scrollChanged': {
+				if (!this.isActiveResource(event.payload.resource)) {
+					await this.activateReplayResource(event.payload.resource, operation);
+				}
+				if (this.isCurrentOperation(operation)) {
+					this.surface?.applyScroll(event.payload.resource, event.payload);
+				}
 				break;
 			}
 			case 'editor.documentSaved': {
@@ -816,6 +840,11 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	private async activateReplayResource(resource: ICodeScrimWorkspaceResource, operation: number): Promise<void> {
 		this.replayActiveResource = resource;
 		await this.showResource(resource, operation);
+	}
+
+	private isActiveResource(resource: ICodeScrimWorkspaceResource): boolean {
+		return this._activeResource !== undefined &&
+			CodeScrimRecordingBuffer.resourceKey(this._activeResource) === CodeScrimRecordingBuffer.resourceKey(resource);
 	}
 
 	private async showResource(resource: ICodeScrimWorkspaceResource, operation: number): Promise<void> {
@@ -1137,6 +1166,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			totalEventCount: this.cursor.totalEventCount,
 		});
 		this.narrationPlayback.update(this._state);
+		this.surface?.showBrowserFrame(findCodeScrimBrowserFrame(this.activeDraft.browser, position));
 		this._onDidChangeState.fire(this._state);
 	}
 
@@ -1164,6 +1194,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	private publishIdle(): void {
 		this._state = Object.freeze({ status: 'idle' });
 		this.narrationPlayback.update(this._state);
+		this.surface?.showBrowserFrame(undefined);
 		this._onDidChangeState.fire(this._state);
 	}
 

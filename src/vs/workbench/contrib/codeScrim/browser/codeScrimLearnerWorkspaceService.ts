@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Sequencer } from '../../../../base/common/async.js';
+import { Limiter, Sequencer } from '../../../../base/common/async.js';
 import { decodeBase64, encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
 import { dirname, extUri, joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -52,7 +52,12 @@ export class CodeScrimLearnerWorkspaceService implements ICodeScrimLearnerWorksp
 
 	reset(draft: ICodeScrimRecordingDraft, checkpoint: ICodeScrimRecordingCheckpoint): Promise<void> {
 		return this.operations.queue(async () => {
-			await this.deleteOwnedWorkspace(this.readStoredWorkspace());
+			const staleWorkspace = this._workspaceRoot ?? this.readStoredWorkspace();
+			// Invalidate the public root before deleting it. File-tree refreshes can otherwise
+			// start against a path that disappears while an indexed checkpoint is restored.
+			this._workspaceRoot = undefined;
+			this.roots = [];
+			await this.deleteOwnedWorkspace(staleWorkspace);
 			this.synthesizedFiles.clear();
 			const recordedRoots = collectCodeScrimWorkspaceRoots(draft);
 			// An empty lesson still needs one writable learner root. Without this fallback,
@@ -139,10 +144,11 @@ export class CodeScrimLearnerWorkspaceService implements ICodeScrimLearnerWorksp
 
 	disposeWorkspace(): Promise<void> {
 		return this.operations.queue(async () => {
-			await this.deleteOwnedWorkspace(this._workspaceRoot ?? this.readStoredWorkspace());
+			const workspace = this._workspaceRoot ?? this.readStoredWorkspace();
 			this._workspaceRoot = undefined;
 			this.roots = [];
 			this.synthesizedFiles.clear();
+			await this.deleteOwnedWorkspace(workspace);
 		});
 	}
 
@@ -154,14 +160,19 @@ export class CodeScrimLearnerWorkspaceService implements ICodeScrimLearnerWorksp
 		for (const directory of directories) {
 			await this.materializeEntry(directory);
 		}
+		// File writes are independent once their directories exist. Bounded parallelism avoids
+		// serially awaiting thousands of small files without flooding the file service.
+		const writes = new Limiter<void>(16);
+		const pendingWrites: Promise<void>[] = [];
 		for (const entry of checkpoint.entries) {
 			if (entry.type === 'file' && !documents.has(CodeScrimRecordingBuffer.resourceKey(entry.resource))) {
-				await this.materializeEntry(entry);
+				pendingWrites.push(writes.queue(() => this.materializeEntry(entry)));
 			}
 		}
 		for (const document of checkpoint.documents) {
-			await this.writeTextNow(document.resource, document.text);
+			pendingWrites.push(writes.queue(() => this.writeTextNow(document.resource, document.text)));
 		}
+		await Promise.all(pendingWrites);
 		await this.ensureTypeScriptProjectBoundaries(checkpoint);
 	}
 

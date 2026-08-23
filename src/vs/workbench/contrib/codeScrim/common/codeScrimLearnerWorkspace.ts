@@ -48,6 +48,7 @@ export function collectCodeScrimWorkspaceRoots(draft: ICodeScrimRecordingDraft):
 				break;
 			case 'editor.documentChanged':
 			case 'editor.selectionChanged':
+			case 'editor.scrollChanged':
 			case 'editor.documentSaved':
 				add(event.payload.resource);
 				break;

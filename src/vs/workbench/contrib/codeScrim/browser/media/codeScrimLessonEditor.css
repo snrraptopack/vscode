@@ -419,8 +419,118 @@
 }
 
 .codescrim-session-code-editor[hidden],
-.codescrim-session-diff-editor[hidden] {
+.codescrim-session-diff-editor[hidden],
+.codescrim-session-browser-preview[hidden] {
 	display: none;
+}
+
+.codescrim-session-browser-preview {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
+	z-index: 3;
+	display: grid;
+	min-width: 0;
+	min-height: 0;
+	grid-template-rows: 40px minmax(0, 1fr);
+	background: var(--vscode-editor-background);
+}
+
+.codescrim-session-browser-toolbar {
+	display: flex;
+	box-sizing: border-box;
+	min-width: 0;
+	padding: 0 var(--vscode-spacing-size80);
+	align-items: center;
+	gap: var(--vscode-spacing-size80);
+	border-bottom: 1px solid var(--vscode-editorGroupHeader-tabsBorder);
+	background: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+.codescrim-session-browser-identity {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	flex: 1;
+	gap: var(--vscode-spacing-size80);
+}
+
+.codescrim-session-browser-identity > .codicon {
+	color: var(--vscode-icon-foreground);
+}
+
+.codescrim-session-browser-metadata {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+}
+
+.codescrim-session-browser-metadata strong,
+.codescrim-session-browser-metadata span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.codescrim-session-browser-metadata strong {
+	font-size: var(--vscode-fontSize-label1);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.codescrim-session-browser-metadata span {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label3);
+}
+
+.codescrim-session-browser-mode {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label3);
+}
+
+.codescrim-session-browser-action,
+.codescrim-session-browser-close {
+	box-sizing: border-box;
+	height: 28px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-foreground);
+	font-family: inherit;
+	cursor: pointer;
+}
+
+.codescrim-session-browser-action {
+	padding: 0 var(--vscode-spacing-size80);
+}
+
+.codescrim-session-browser-close {
+	display: grid;
+	width: 28px;
+	padding: 0;
+	place-items: center;
+}
+
+.codescrim-session-browser-action:hover,
+.codescrim-session-browser-close:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.codescrim-session-browser-viewport {
+	display: grid;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	place-items: center;
+	background: #fff;
+}
+
+.codescrim-session-browser-viewport img {
+	display: block;
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
 }
 
 .codescrim-session-replay-tabs {

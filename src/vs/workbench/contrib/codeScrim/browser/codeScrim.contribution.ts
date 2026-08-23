@@ -9,6 +9,7 @@ import { Schemas } from '../../../../base/common/network.js';
 import { basename, extname, joinPath } from '../../../../base/common/resources.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
@@ -20,8 +21,11 @@ import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/
 import { ActiveEditorContext } from '../../../common/contextkeys.js';
 import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
-import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { IEditorService, SIDE_GROUP } from '../../../services/editor/common/editorService.js';
+import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
+import { IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
 import { TerminalContextKeys } from '../../terminal/common/terminalContextKey.js';
+import { CODE_SCRIM_OPEN_AUTHOR_BROWSER_COMMAND_ID, CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, CODE_SCRIM_TOGGLE_LESSON_BROWSER_COMMAND_ID } from '../common/codeScrimBrowser.js';
 import { CODE_SCRIM_OPEN_RECORDING_COMMAND_ID, CODE_SCRIM_PACKAGE_EXTENSION, CODE_SCRIM_SAVE_RECORDING_COMMAND_ID, ICodeScrimPackageService } from '../common/codeScrimPackage.js';
 import { CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft } from '../common/codeScrimRecording.js';
 import { CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID, CODE_SCRIM_RESTART_REPLAY_COMMAND_ID, CODE_SCRIM_RESUME_REPLAY_COMMAND_ID, CODE_SCRIM_STOP_REPLAY_COMMAND_ID, ICodeScrimReplayService } from '../common/codeScrimReplay.js';
@@ -153,6 +157,70 @@ registerAction2(class extends Action2 {
 		if (activeEditorPane instanceof CodeScrimLessonEditor) {
 			await activeEditorPane.toggleTerminalPanel();
 		}
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: CODE_SCRIM_OPEN_AUTHOR_BROWSER_COMMAND_ID,
+			title: localize2('codeScrim.openAuthorBrowser', "Open CodeScrim Browser"),
+			category: localize2('codeScrim.category', "CodeScrim"),
+			icon: Codicon.globe,
+			f1: true,
+			menu: {
+				id: MenuId.TitleBar,
+				group: 'navigation',
+				order: 8990,
+				when: ContextKeyExpr.and(
+					ActiveEditorContext.notEqualsTo(CodeScrimLessonEditorInput.EDITOR_ID),
+					ActiveEditorContext.notEqualsTo(BrowserEditorInput.ID),
+				),
+			},
+		});
+	}
+
+	run(accessor: ServicesAccessor): Promise<void> {
+		return openCodeScrimBrowser(accessor, 'codescrim-author-browser', localize('codeScrim.authorBrowserTitle', "CodeScrim Browser"));
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: CODE_SCRIM_TOGGLE_LESSON_BROWSER_COMMAND_ID,
+			title: localize2('codeScrim.toggleLessonBrowser', "Toggle Browser"),
+			icon: Codicon.globe,
+			f1: false,
+			menu: {
+				id: MenuId.TitleBar,
+				group: 'navigation',
+				order: 8990,
+				when: ActiveEditorContext.isEqualTo(CodeScrimLessonEditorInput.EDITOR_ID),
+			},
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const activeEditorPane = accessor.get(IEditorService).activeEditorPane;
+		if (activeEditorPane instanceof CodeScrimLessonEditor) {
+			await activeEditorPane.toggleBrowserPanel();
+		}
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID,
+			title: localize2('codeScrim.openLearnerBrowser', "Open My Preview"),
+			category: localize2('codeScrim.category', "CodeScrim"),
+			f1: false,
+		});
+	}
+
+	run(accessor: ServicesAccessor): Promise<void> {
+		return openCodeScrimBrowser(accessor, 'codescrim-learner-browser', localize('codeScrim.learnerBrowserTitle', "My Preview"));
 	}
 });
 
@@ -509,6 +577,13 @@ async function openRecordingPreview(editorService: IEditorService, instantiation
 		duration: Math.ceil(draft.duration / 1000),
 	};
 	await editorService.openEditor(instantiationService.createInstance(CodeScrimLessonEditorInput, previewLesson), { pinned: true });
+}
+
+async function openCodeScrimBrowser(accessor: ServicesAccessor, id: string, title: string): Promise<void> {
+	const browserViewService = accessor.get(IBrowserViewWorkbenchService);
+	const editorService = accessor.get(IEditorService);
+	const input = browserViewService.getOrCreateLazy(id, { url: 'about:blank', title });
+	await editorService.openEditor(input, { pinned: true }, SIDE_GROUP);
 }
 
 function parseLessonDescriptor(serializedEditor: string): ICodeScrimLessonDescriptor | undefined {

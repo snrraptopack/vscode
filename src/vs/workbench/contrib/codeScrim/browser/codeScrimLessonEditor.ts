@@ -35,7 +35,8 @@ import { IThemeService } from '../../../../platform/theme/common/themeService.js
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { IEditorOpenContext } from '../../../common/editor.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
-import { CodeScrimRecordingBuffer, ICodeScrimSelection, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
+import { CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, ICodeScrimBrowserFrame } from '../common/codeScrimBrowser.js';
+import { CodeScrimRecordingBuffer, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
 import { CodeScrimLessonEditorInput } from './codeScrimLessonEditorInput.js';
@@ -72,6 +73,12 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private terminalTimeline: CodeScrimTerminalTimeline | undefined;
 	private diffEditorHost: HTMLElement | undefined;
 	private diffEditor: DiffEditorWidget | undefined;
+	private browserPreview: HTMLElement | undefined;
+	private browserImage: HTMLImageElement | undefined;
+	private browserTitle: HTMLElement | undefined;
+	private browserUrl: HTMLElement | undefined;
+	private browserFrame: ICodeScrimBrowserFrame | undefined;
+	private browserPreviewSuppressed = false;
 	private navigationRevealButton: HTMLButtonElement | undefined;
 	private contextRevealButton: HTMLButtonElement | undefined;
 	private status: HTMLElement | undefined;
@@ -190,6 +197,15 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		await this.terminalSurface?.togglePanel();
 	}
 
+	async toggleBrowserPanel(): Promise<void> {
+		if (!this.browserFrame) {
+			await this.commandService.executeCommand(CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID);
+			return;
+		}
+		this.browserPreviewSuppressed = !this.browserPreviewSuppressed;
+		this.renderBrowserFrame();
+	}
+
 	openResource(resource: ICodeScrimWorkspaceResource, model: ITextModel): void {
 		const key = CodeScrimRecordingBuffer.resourceKey(resource);
 		if (!this.openedResources.some(candidate => CodeScrimRecordingBuffer.resourceKey(candidate) === key)) {
@@ -222,8 +238,27 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.closeReplayTab(resource, false);
 	}
 
+	applyScroll(resource: ICodeScrimWorkspaceResource, position: ICodeScrimScrollPosition): void {
+		if (this.codeEditor?.getModel() !== this.replayService.getLearnerModel(resource)) {
+			return;
+		}
+		this.codeEditor.setScrollPosition(position, ScrollType.Immediate);
+	}
+
+	showBrowserFrame(frame: ICodeScrimBrowserFrame | undefined): void {
+		if (!frame) {
+			this.browserPreviewSuppressed = false;
+		}
+		if (this.browserFrame === frame) {
+			return;
+		}
+		this.browserFrame = frame;
+		this.renderBrowserFrame();
+	}
+
 	clear(): void {
 		this.dismissExperimentPopover();
+		this.showBrowserFrame(undefined);
 		this.codeEditor?.setModel(null);
 		this.openedResources.length = 0;
 		this.root?.classList.remove('has-replay-model');
@@ -376,6 +411,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			originalAriaLabel: localize('codeScrim.instructorVersion', "Instructor version"),
 			modifiedAriaLabel: localize('codeScrim.learnerVersion', "Learner version"),
 		}, {}));
+		this.createBrowserPreview(content);
 		this.terminalSurface = this._register(this.instantiationService.createInstance(CodeScrimTerminalSurface));
 		const playButton = DOM.append(content, DOM.$('button.codescrim-session-stage-play', {
 			type: 'button',
@@ -394,6 +430,61 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}));
 
 		this.createTransport(main);
+	}
+
+	private createBrowserPreview(content: HTMLElement): void {
+		const preview = this.browserPreview = DOM.append(content, DOM.$('section.codescrim-session-browser-preview', {
+			'aria-label': localize('codeScrim.recordedBrowserPreview', "Recorded Browser Preview"),
+		}));
+		preview.hidden = true;
+		const toolbar = DOM.append(preview, DOM.$('.codescrim-session-browser-toolbar'));
+		const identity = DOM.append(toolbar, DOM.$('.codescrim-session-browser-identity'));
+		identity.appendChild(renderIcon(Codicon.globe));
+		const metadata = DOM.append(identity, DOM.$('.codescrim-session-browser-metadata'));
+		this.browserTitle = DOM.append(metadata, DOM.$('strong'));
+		this.browserUrl = DOM.append(metadata, DOM.$('span'));
+		DOM.append(toolbar, DOM.$('.codescrim-session-browser-mode', undefined, localize('codeScrim.lessonBrowserMode', "Lesson Preview")));
+
+		const liveButton = DOM.append(toolbar, DOM.$('button.codescrim-session-browser-action', {
+			type: 'button',
+			title: localize('codeScrim.openLearnerBrowser', "Open My Preview"),
+		}, localize('codeScrim.myBrowserPreview', "My Preview"))) as HTMLButtonElement;
+		this._register(DOM.addDisposableListener(liveButton, DOM.EventType.CLICK, () => {
+			void this.commandService.executeCommand(CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID);
+		}));
+
+		const closeButton = DOM.append(toolbar, DOM.$('button.codescrim-session-browser-close', {
+			type: 'button',
+			title: localize('codeScrim.hideRecordedBrowser', "Hide Recorded Browser"),
+			'aria-label': localize('codeScrim.hideRecordedBrowser', "Hide Recorded Browser"),
+		})) as HTMLButtonElement;
+		closeButton.appendChild(renderIcon(Codicon.close));
+		this._register(DOM.addDisposableListener(closeButton, DOM.EventType.CLICK, () => {
+			this.browserPreviewSuppressed = true;
+			this.renderBrowserFrame();
+		}));
+
+		const viewport = DOM.append(preview, DOM.$('.codescrim-session-browser-viewport'));
+		this.browserImage = DOM.append(viewport, DOM.$('img', {
+			alt: localize('codeScrim.recordedBrowserFrame', "Recorded instructor browser frame"),
+		})) as HTMLImageElement;
+	}
+
+	private renderBrowserFrame(): void {
+		if (!this.browserPreview || !this.browserImage) {
+			return;
+		}
+		const frame = this.browserFrame;
+		const visible = !!frame && !this.browserPreviewSuppressed;
+		this.browserPreview.hidden = !visible;
+		this.root?.classList.toggle('has-browser-preview', visible);
+		if (!visible || !frame) {
+			this.browserImage.removeAttribute('src');
+			return;
+		}
+		this.browserTitle!.textContent = frame.title || localize('codeScrim.untitledBrowserPage', "Browser");
+		this.browserUrl!.textContent = frame.url;
+		this.browserImage.src = `data:${frame.mimeType};base64,${frame.data}`;
 	}
 
 	private createTransport(main: HTMLElement): void {

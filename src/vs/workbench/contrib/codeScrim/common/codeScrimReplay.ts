@@ -7,7 +7,8 @@ import { Event } from '../../../../base/common/event.js';
 import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
+import { ICodeScrimBrowserFrame } from './codeScrimBrowser.js';
+import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalCommandCluster, ICodeScrimTerminalState } from './codeScrimTerminal.js';
 
 export const CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID = 'codescrim.replayLastRecording';
@@ -91,7 +92,9 @@ export type CodeScrimReplayState =
 export interface ICodeScrimReplaySurface {
 	openResource(resource: ICodeScrimWorkspaceResource, model: ITextModel): void;
 	applySelections(resource: ICodeScrimWorkspaceResource, selections: readonly ICodeScrimSelection[]): void;
+	applyScroll(resource: ICodeScrimWorkspaceResource, position: ICodeScrimScrollPosition): void;
 	closeResource(resource: ICodeScrimWorkspaceResource): void;
+	showBrowserFrame(frame: ICodeScrimBrowserFrame | undefined): void;
 	clear(): void;
 }
 

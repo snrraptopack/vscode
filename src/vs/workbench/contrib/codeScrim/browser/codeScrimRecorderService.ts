@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { mainWindow } from '../../../../base/browser/window.js';
+import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
@@ -24,9 +25,11 @@ import { IEditorService } from '../../../services/editor/common/editorService.js
 import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
 import { ITerminalService } from '../../terminal/browser/terminal.js';
+import { IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
 import { ICodeScrimPackageService } from '../common/codeScrimPackage.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEventData, CodeScrimRecordingState, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimNarrationCapture } from './codeScrimNarrationCapture.js';
+import { CodeScrimBrowserCapture } from './codeScrimBrowserCapture.js';
 import { CodeScrimTerminalRecorder } from './codeScrimTerminalRecorder.js';
 
 const MAX_CHECKPOINT_FILE_SIZE = 2 * 1024 * 1024;
@@ -47,6 +50,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 	private readonly buffer = new CodeScrimRecordingBuffer();
 	private readonly terminalRecorder: CodeScrimTerminalRecorder;
 	private readonly narrationCapture: CodeScrimNarrationCapture;
+	private readonly browserCapture: CodeScrimBrowserCapture;
 	private readonly recordingListeners = this._register(new MutableDisposable<DisposableStore>());
 	private readonly recordingStatus = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
 	private readonly stopRecordingStatus = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
@@ -75,6 +79,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		@ILogService private readonly logService: ILogService,
 		@IModelService private readonly modelService: IModelService,
 		@INotificationService notificationService: INotificationService,
+		@IBrowserViewWorkbenchService browserViewService: IBrowserViewWorkbenchService,
 		@ICodeScrimPackageService private readonly packageService: ICodeScrimPackageService,
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
 		@ITextFileService private readonly textFileService: ITextFileService,
@@ -85,6 +90,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		super();
 		this.terminalRecorder = new CodeScrimTerminalRecorder(terminalService, event => this.append(event));
 		this.narrationCapture = this._register(new CodeScrimNarrationCapture(notificationService, logService));
+		this.browserCapture = this._register(new CodeScrimBrowserCapture(browserViewService, logService));
 		this.syncStatusbar();
 	}
 
@@ -122,6 +128,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 			// must never become a blank delay at the beginning of every replay.
 			const startedAt = this.now();
 			this.buffer.start(draftId, startedAt);
+			await this.browserCapture.start(() => this.buffer.position(this.now()));
 			if (narrationReady) {
 				this.narrationCapture.startSegment(0);
 			}
@@ -136,9 +143,11 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 			this.pendingWorkspaceChanges = Promise.resolve();
 			this.recordingListeners.value = this.createRecordingListeners();
 			this.recordActiveResource();
+			this.recordActiveEditorScroll();
 			this.publishState();
 			return true;
 		} catch (error) {
+			this.browserCapture.discard();
 			this.narrationCapture.discard();
 			if (this.buffer.isRecording) {
 				this.buffer.stop(this.now());
@@ -155,6 +164,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		}
 		this.recordingListeners.clear();
 		await this.pendingWorkspaceChanges;
+		await this.browserCapture.pause(this.buffer.position(now));
 		await this.pauseNarration(this.buffer.position(now));
 		this.buffer.captureCheckpoint(now);
 		this.publishState();
@@ -167,9 +177,11 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 			return false;
 		}
 		this.narrationCapture.startSegment(this.buffer.position(now));
+		this.browserCapture.resume();
 		// Listeners are recreated because pause intentionally detached every event source.
 		this.recordingListeners.value = this.createRecordingListeners(false);
 		this.recordActiveResource();
+		this.recordActiveEditorScroll();
 		this.publishState();
 		return true;
 	}
@@ -184,8 +196,13 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		await this.pendingWorkspaceChanges;
 		const now = this.now();
 		const stoppedDraft = this.buffer.stop(now);
+		const browser = stoppedDraft ? await this.browserCapture.finish(stoppedDraft.duration) : undefined;
 		const narration = stoppedDraft ? await this.finishNarration(stoppedDraft.duration) : undefined;
-		const draft = stoppedDraft && narration ? Object.freeze({ ...stoppedDraft, narration }) : stoppedDraft;
+		const draft = stoppedDraft ? Object.freeze({
+			...stoppedDraft,
+			...(browser ? { browser } : {}),
+			...(narration ? { narration } : {}),
+		}) : undefined;
 		if (draft) {
 			this._lastDraft = draft;
 			this._onDidChangeDraft.fire(draft);
@@ -241,7 +258,10 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 			this.listenToModel(model, listeners, captureExistingAsCheckpoint);
 		}
 		listeners.add(this.modelService.onModelAdded(model => this.listenToModel(model, listeners, false)));
-		listeners.add(this.editorService.onDidActiveEditorChange(() => this.recordActiveResource()));
+		listeners.add(this.editorService.onDidActiveEditorChange(() => {
+			this.recordActiveResource();
+			this.recordActiveEditorScroll();
+		}));
 		for (const editor of this.codeEditorService.listCodeEditors()) {
 			this.listenToEditor(editor, listeners);
 		}
@@ -329,6 +349,37 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 	}
 
 	private listenToEditor(editor: ICodeEditor, listeners: DisposableStore): void {
+		let lastScrollRecordedAt = Number.NEGATIVE_INFINITY;
+		let pendingScroll: { readonly resource: ICodeScrimWorkspaceResource; readonly scrollTop: number; readonly scrollLeft: number } | undefined;
+		const recordPendingScroll = () => {
+			if (!pendingScroll) {
+				return;
+			}
+			this.append({ domain: 'editor', kind: 'editor.scrollChanged', payload: pendingScroll });
+			pendingScroll = undefined;
+			lastScrollRecordedAt = this.now();
+		};
+		const trailingScroll = listeners.add(new RunOnceScheduler(recordPendingScroll, 100));
+		listeners.add(editor.onDidScrollChange(event => {
+			if ((!event.scrollTopChanged && !event.scrollLeftChanged) || this.codeEditorService.getActiveCodeEditor() !== editor) {
+				return;
+			}
+			const model = editor.getModel();
+			const resource = model && this.toWorkspaceResource(model.uri);
+			if (!resource) {
+				return;
+			}
+			pendingScroll = { resource, scrollTop: event.scrollTop, scrollLeft: event.scrollLeft };
+			const remaining = 100 - (this.now() - lastScrollRecordedAt);
+			if (remaining <= 0) {
+				trailingScroll.cancel();
+				recordPendingScroll();
+			} else {
+				// Sample continuous wheel/trackpad movement and retain its final resting position.
+				trailingScroll.schedule(remaining);
+			}
+		}));
+
 		listeners.add(editor.onDidChangeCursorSelection(event => {
 			if (this.codeEditorService.getActiveCodeEditor() !== editor) {
 				return;
@@ -352,6 +403,19 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 				payload: { resource, modelVersionId: event.modelVersionId, selections },
 			});
 		}));
+	}
+
+	private recordActiveEditorScroll(): void {
+		const editor = this.codeEditorService.getActiveCodeEditor();
+		const model = editor?.getModel();
+		const resource = model && this.toWorkspaceResource(model.uri);
+		if (editor && resource) {
+			this.append({
+				domain: 'editor',
+				kind: 'editor.scrollChanged',
+				payload: { resource, scrollTop: editor.getScrollTop(), scrollLeft: editor.getScrollLeft() },
+			});
+		}
 	}
 
 	private recordActiveResource(): void {

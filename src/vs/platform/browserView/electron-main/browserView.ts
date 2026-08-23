@@ -658,7 +658,13 @@ export class BrowserView extends Disposable {
 	 * Toggle developer tools for this browser view.
 	 */
 	toggleDevTools(): void {
-		this._view.webContents.toggleDevTools();
+		if (this._view.webContents.isDevToolsOpened()) {
+			this._view.webContents.closeDevTools();
+		} else {
+			// Browser lessons need the inspected page and its tools visible together. Electron's
+			// default can choose a detached window, which is easy to lose behind the workbench.
+			this._view.webContents.openDevTools({ mode: 'right' });
+		}
 	}
 
 	/**

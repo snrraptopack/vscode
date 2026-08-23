@@ -41,7 +41,7 @@ export class CodeScrimPackageService implements ICodeScrimPackageService {
 		@IFileService private readonly fileService: IFileService,
 		@ILogService private readonly logService: ILogService,
 		@ISecretStorageService private readonly secretStorageService: ISecretStorageService,
-		@IUserDataProfilesService userDataProfilesService: Pick<IUserDataProfilesService, 'defaultProfile'>,
+		@IUserDataProfilesService userDataProfilesService: IUserDataProfilesService,
 	) {
 		this.draftResource = joinPath(
 			userDataProfilesService.defaultProfile.globalStorageHome,

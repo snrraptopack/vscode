@@ -12,7 +12,7 @@ import { FileService } from '../../../../../platform/files/common/fileService.js
 import { InMemoryFileSystemProvider } from '../../../../../platform/files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../../../platform/log/common/log.js';
 import { TestSecretStorageService } from '../../../../../platform/secrets/test/common/testSecretStorageService.js';
-import { toUserDataProfile } from '../../../../../platform/userDataProfile/common/userDataProfile.js';
+import { IUserDataProfilesService, toUserDataProfile } from '../../../../../platform/userDataProfile/common/userDataProfile.js';
 import { CodeScrimPackageService } from '../../browser/codeScrimPackageService.js';
 import { ICodeScrimRecordingDraft } from '../../common/codeScrimRecording.js';
 
@@ -24,7 +24,7 @@ suite('CodeScrimPackageService', () => {
 		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
 		const secrets = disposables.add(new TestSecretStorageService());
 		const profile = toUserDataProfile('test', 'Test', URI.from({ scheme: Schemas.inMemory, path: '/profile' }), URI.from({ scheme: Schemas.inMemory, path: '/cache' }));
-		const profiles = { defaultProfile: profile };
+		const profiles = { defaultProfile: profile } as IUserDataProfilesService;
 		const first = new CodeScrimPackageService(fileService, new NullLogService(), secrets, profiles);
 		await first.saveDraft(createDraft());
 
@@ -48,7 +48,8 @@ suite('CodeScrimPackageService', () => {
 		const fileService = disposables.add(new FileService(new NullLogService()));
 		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
 		const profile = toUserDataProfile('delete-test', 'Delete Test', URI.from({ scheme: Schemas.inMemory, path: '/delete-profile' }), URI.from({ scheme: Schemas.inMemory, path: '/delete-cache' }));
-		const service = new CodeScrimPackageService(fileService, new NullLogService(), disposables.add(new TestSecretStorageService()), { defaultProfile: profile });
+		const profiles = { defaultProfile: profile } as IUserDataProfilesService;
+		const service = new CodeScrimPackageService(fileService, new NullLogService(), disposables.add(new TestSecretStorageService()), profiles);
 		const exported = URI.from({ scheme: Schemas.inMemory, path: '/course/lesson.scrim' });
 		await service.saveDraft(createDraft());
 		await service.savePackage(exported, createDraft());

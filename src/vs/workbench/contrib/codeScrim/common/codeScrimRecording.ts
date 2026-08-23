@@ -5,6 +5,7 @@
 
 import { Event } from '../../../../base/common/event.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { ICodeScrimBrowserTrack } from './codeScrimBrowser.js';
 import { ICodeScrimNarrationTrack } from './codeScrimNarration.js';
 import { CodeScrimTerminalEventData, CodeScrimTerminalState, ICodeScrimTerminalCheckpoint } from './codeScrimTerminal.js';
 
@@ -32,6 +33,11 @@ export interface ICodeScrimSelection {
 	readonly positionColumn: number;
 }
 
+export interface ICodeScrimScrollPosition {
+	readonly scrollTop: number;
+	readonly scrollLeft: number;
+}
+
 export interface ICodeScrimDocumentCheckpoint {
 	readonly resource: ICodeScrimWorkspaceResource;
 	readonly languageId: string;
@@ -54,6 +60,7 @@ export interface ICodeScrimRecordingCheckpoint {
 	readonly eventIndex: number;
 	readonly activeResource?: ICodeScrimWorkspaceResource;
 	readonly selections?: readonly ICodeScrimSelection[];
+	readonly scrollPosition?: ICodeScrimScrollPosition;
 	readonly documents: readonly ICodeScrimDocumentCheckpoint[];
 	readonly entries: readonly ICodeScrimWorkspaceEntryCheckpoint[];
 	readonly skippedEntryCount: number;
@@ -89,6 +96,11 @@ export type CodeScrimEditorEvent =
 		readonly modelVersionId: number;
 		readonly selections: readonly ICodeScrimSelection[];
 	}>
+	| ICodeScrimEvent<'editor', 'editor.scrollChanged', {
+		readonly resource: ICodeScrimWorkspaceResource;
+		readonly scrollTop: number;
+		readonly scrollLeft: number;
+	}>
 	| ICodeScrimEvent<'editor', 'editor.documentSaved', {
 		readonly resource: ICodeScrimWorkspaceResource;
 		readonly reason?: number;
@@ -116,6 +128,7 @@ export interface ICodeScrimRecordingDraft {
 	readonly duration: number;
 	readonly checkpoints: readonly ICodeScrimRecordingCheckpoint[];
 	readonly events: readonly CodeScrimRecordingEvent[];
+	readonly browser?: ICodeScrimBrowserTrack;
 	readonly narration?: ICodeScrimNarrationTrack;
 }
 
@@ -143,6 +156,7 @@ export class CodeScrimRecordingBuffer {
 	private readonly checkpoints: ICodeScrimRecordingCheckpoint[] = [];
 	private activeResource: ICodeScrimWorkspaceResource | undefined;
 	private selections: readonly ICodeScrimSelection[] | undefined;
+	private scrollPosition: ICodeScrimScrollPosition | undefined;
 	private readonly terminalState = new CodeScrimTerminalState();
 	private skippedEntries = 0;
 
@@ -193,6 +207,7 @@ export class CodeScrimRecordingBuffer {
 		this.checkpoints.length = 0;
 		this.activeResource = undefined;
 		this.selections = undefined;
+		this.scrollPosition = undefined;
 		this.terminalState.reset();
 		this.skippedEntries = 0;
 	}
@@ -309,6 +324,7 @@ export class CodeScrimRecordingBuffer {
 		this.checkpoints.length = 0;
 		this.activeResource = undefined;
 		this.selections = undefined;
+		this.scrollPosition = undefined;
 		this.terminalState.reset();
 		this.skippedEntries = 0;
 		return draft;
@@ -338,6 +354,7 @@ export class CodeScrimRecordingBuffer {
 			eventIndex: this.events.length,
 			...(this.activeResource ? { activeResource: Object.freeze({ ...this.activeResource }) } : {}),
 			...(this.selections ? { selections: Object.freeze(this.selections.map(selection => Object.freeze({ ...selection }))) } : {}),
+			...(this.scrollPosition ? { scrollPosition: Object.freeze({ ...this.scrollPosition }) } : {}),
 			documents: Object.freeze([...this.documents.values()]),
 			entries: Object.freeze([...this.entries.values()]),
 			skippedEntryCount: this.skippedEntries,
@@ -364,6 +381,7 @@ export class CodeScrimRecordingBuffer {
 			case 'editor.activeResourceChanged':
 				this.activeResource = event.payload.resource ? Object.freeze({ ...event.payload.resource }) : undefined;
 				this.selections = undefined;
+				this.scrollPosition = undefined;
 				break;
 			case 'editor.documentChanged': {
 				const key = CodeScrimRecordingBuffer.resourceKey(event.payload.resource);
@@ -381,6 +399,10 @@ export class CodeScrimRecordingBuffer {
 			case 'editor.selectionChanged':
 				this.activeResource = Object.freeze({ ...event.payload.resource });
 				this.selections = Object.freeze(event.payload.selections.map(selection => Object.freeze({ ...selection })));
+				break;
+			case 'editor.scrollChanged':
+				this.activeResource = Object.freeze({ ...event.payload.resource });
+				this.scrollPosition = Object.freeze({ scrollTop: event.payload.scrollTop, scrollLeft: event.payload.scrollLeft });
 				break;
 			case 'editor.documentSaved':
 				break;

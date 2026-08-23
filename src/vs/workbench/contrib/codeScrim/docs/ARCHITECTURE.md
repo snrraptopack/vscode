@@ -60,7 +60,7 @@ It exposes direct operations for control flow and events only for broadcasting s
 
 Starts and stops recordings, owns recorder adapters, normalizes timestamps against one monotonic clock, writes event chunks, and creates checkpoints.
 
-The first native adapter snapshots a bounded workspace tree, then records real file lifecycle events, text-model changes, active resources, selections, and saves while the creator continues using the normal workbench. Resources are stored as workspace-root index plus relative path; models outside the workspace are ignored so drafts do not capture absolute machine paths. A native status-bar entry is the only persistent recording chrome.
+The first native adapter snapshots a bounded workspace tree, then records real file lifecycle events, text-model changes, active resources, selections, editor scrolling, and saves while the creator continues using the normal workbench. Continuous wheel and trackpad movement is sampled at a bounded cadence while preserving the final resting position. Resources are stored as workspace-root index plus relative path; models outside the workspace are ignored so drafts do not capture absolute machine paths. A native status-bar entry is the only persistent recording chrome.
 
 ### `ICodeScrimReplayService`
 
@@ -132,6 +132,15 @@ Validates manifests, streams event chunks and media, verifies hashes, and perfor
 - Replay decodes narration through a product-owned `AudioContext`, corrects meaningful drift against replay position, and pauses or seeks with the rest of the lesson.
 - CodeScrim deliberately does not depend on Chat Voice Mode: that path produces speech-service PCM, while lesson narration needs portable encoded media.
 - Device selection, input-level UI, narration replacement, crash-safe live chunk persistence, and any future signed native sidecar remain later audio layers.
+
+## Browser capture and replay
+
+- The instructor opens the core Integrated Browser through a CodeScrim title-bar action. CodeScrim does not ship or invoke the Simple Browser extension.
+- Recording observes visible native browser-view models and captures navigation metadata plus change-deduplicated JPEG viewport frames on the CodeScrim clock.
+- Browser pixels are content-addressed and encrypted with the rest of the `.scrim`; URLs are metadata rather than replay instructions.
+- Lesson Preview selects the recorded frame at the current replay or seek position and never creates web contents, contacts the network, or starts a server.
+- My Preview is a separate native Integrated Browser opened only by learner action. Its history, execution, and network effects are not instructor replay state.
+- The initial frame cadence is an implementation seam. Chromium screencast segments, console events, and network metadata can replace or augment it without changing the passive/live product boundary.
 
 ## Native UI composition
 
