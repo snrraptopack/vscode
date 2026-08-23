@@ -37,7 +37,7 @@ import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { IEditorOpenContext } from '../../../common/editor.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
 import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
-import { CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID, ICodeScrimBrowserPageState } from '../common/codeScrimBrowser.js';
+import { CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID, ICodeScrimBrowserPageState, ICodeScrimBrowserThumbnail } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
@@ -78,8 +78,10 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private browserPreview: HTMLElement | undefined;
 	private browserTitle: HTMLElement | undefined;
 	private browserUrl: HTMLElement | undefined;
-	private replayBrowserInput = this._register(new MutableDisposable<BrowserEditorInput>());
+	private browserThumbnail: HTMLImageElement | undefined;
+	private browserThumbnailEmpty: HTMLElement | undefined;
 	private browserState: ICodeScrimBrowserPageState | undefined;
+	private browserThumbnailData: ICodeScrimBrowserThumbnail | undefined;
 	private browserPreviewSuppressed = false;
 	private navigationRevealButton: HTMLButtonElement | undefined;
 	private contextRevealButton: HTMLButtonElement | undefined;
@@ -248,18 +250,13 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.codeEditor.setScrollPosition(position, ScrollType.Immediate);
 	}
 
-	showBrowserState(state: ICodeScrimBrowserPageState | undefined): void {
+	showBrowserState(state: ICodeScrimBrowserPageState | undefined, thumbnail?: ICodeScrimBrowserThumbnail): void {
 		if (!state) {
 			this.browserPreviewSuppressed = false;
 		}
-		const previous = this.browserState;
 		this.browserState = state;
-		if (previous?.url !== state?.url || previous?.pageId !== state?.pageId) {
-			this.renderBrowserState();
-		} else {
-			// Same page: only metadata may have shifted, keep the live replay browser mounted.
-			this.renderBrowserMetadata();
-		}
+		this.browserThumbnailData = thumbnail;
+		this.renderBrowserState();
 	}
 
 	clear(): void {
@@ -451,6 +448,17 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.browserUrl = DOM.append(metadata, DOM.$('span'));
 		DOM.append(toolbar, DOM.$('.codescrim-session-browser-mode', undefined, localize('codeScrim.lessonBrowserMode', "Lesson Preview")));
 
+		// The recorded page is restored in a real, read-only Integrated Browser opened
+		// beside the lesson. The preview surface shows the recorded thumbnail and hands
+		// the learner to the live browser for interaction.
+		const replayButton = DOM.append(toolbar, DOM.$('button.codescrim-session-browser-action', {
+			type: 'button',
+			title: localize('codeScrim.openReplayBrowser', "Open Replay Browser"),
+		}, localize('codeScrim.openReplayBrowserLabel', "Open Replay Browser"))) as HTMLButtonElement;
+		this._register(DOM.addDisposableListener(replayButton, DOM.EventType.CLICK, () => {
+			void this.openReplayBrowser();
+		}));
+
 		const liveButton = DOM.append(toolbar, DOM.$('button.codescrim-session-browser-action', {
 			type: 'button',
 			title: localize('codeScrim.openLearnerBrowser', "Open My Preview"),
@@ -470,63 +478,35 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			this.renderBrowserState();
 		}));
 
-		// The replay surface is a real, read-only Integrated Browser. Recorded events
-		// re-drive it on the session clock; the learner can scroll and inspect the
-		// restored page themselves instead of watching recorded pixels.
-		DOM.append(preview, DOM.$('.codescrim-session-browser-replay-host'));
-	}
-
-	private async ensureReplayBrowser(): Promise<BrowserEditorInput | undefined> {
-		if (this.replayBrowserInput?.value) {
-			return this.replayBrowserInput.value;
-		}
-		try {
-			const input = await this.commandService.executeCommand(CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID) as BrowserEditorInput | undefined;
-			if (input) {
-				this.replayBrowserInput.value = input;
-			}
-			return input;
-		} catch (error) {
-			this.logService.warn('[CodeScrim] Could not open the replay browser.', error);
-			return undefined;
-		}
+		const viewport = DOM.append(preview, DOM.$('.codescrim-session-browser-viewport'));
+		this.browserThumbnail = DOM.append(viewport, DOM.$('img', {
+			alt: localize('codeScrim.recordedBrowserThumbnail', "Recorded instructor browser preview"),
+		})) as HTMLImageElement;
+		this.browserThumbnailEmpty = DOM.append(viewport, DOM.$('.codescrim-session-browser-thumbnail-empty', undefined,
+			localize('codeScrim.replayBrowserHint', "Open the Replay Browser to restore this recorded page live.")));
+		this.browserThumbnailEmpty.hidden = true;
 	}
 
 	private renderBrowserState(): void {
-		if (!this.browserPreview) {
+		if (!this.browserPreview || !this.browserThumbnail || !this.browserThumbnailEmpty) {
 			return;
 		}
 		const state = this.browserState;
 		const visible = !!state && !this.browserPreviewSuppressed;
 		this.browserPreview.hidden = !visible;
-		this.root?.classList.toggle('has-browser-preview', visible);
 		if (!visible || !state) {
-			this.renderBrowserMetadata();
 			return;
 		}
 		this.renderBrowserMetadata();
-		void this.applyReplayBrowserState(state);
-	}
-
-	private async applyReplayBrowserState(state: ICodeScrimBrowserPageState): Promise<void> {
-		if (!state.url) {
-			return;
-		}
-		const input = await this.ensureReplayBrowser();
-		if (!input || this.browserState !== state) {
-			return;
-		}
-		try {
-			const model = await input.resolve();
-			if (model.url !== state.url) {
-				await model.loadURL(state.url);
-			} else if (state.scrollTop !== undefined) {
-				await model.setScrollTop(state.scrollTop);
-			}
-		} catch (error) {
-			// The recorded page may no longer be reachable at replay time. Lesson preview
-			// stays honest about that instead of pretending the state was restored.
-			this.logService.warn('[CodeScrim] Replay browser could not restore the recorded page state.', error);
+		const thumbnail = this.browserThumbnailData;
+		if (thumbnail) {
+			this.browserThumbnail.src = `data:${thumbnail.mimeType};base64,${thumbnail.data}`;
+			this.browserThumbnail.style.display = 'block';
+			this.browserThumbnailEmpty.hidden = true;
+		} else {
+			this.browserThumbnail.removeAttribute('src');
+			this.browserThumbnail.style.display = 'none';
+			this.browserThumbnailEmpty.hidden = false;
 		}
 	}
 
@@ -537,6 +517,28 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}
 		if (this.browserUrl) {
 			this.browserUrl.textContent = state?.url ?? '';
+		}
+	}
+
+	/** Opens the dedicated replay browser beside the lesson and restores the current recorded page state in it. */
+	private async openReplayBrowser(): Promise<void> {
+		const state = this.browserState;
+		try {
+			const input = await this.commandService.executeCommand(CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID) as BrowserEditorInput | undefined;
+			if (!input || !state?.url) {
+				return;
+			}
+			const model = await input.resolve();
+			if (model.url !== state.url) {
+				await model.loadURL(state.url);
+			}
+			if (state.scrollTop !== undefined) {
+				await model.setScrollTop(state.scrollTop);
+			}
+		} catch (error) {
+			// The recorded page may no longer be reachable at replay time. The replay
+			// browser stays honest about that instead of pretending the state was restored.
+			this.logService.warn('[CodeScrim] Replay browser could not restore the recorded page state.', error);
 		}
 	}
 

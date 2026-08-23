@@ -7,7 +7,7 @@ import { Event } from '../../../../base/common/event.js';
 import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { ICodeScrimBrowserPageState } from './codeScrimBrowser.js';
+import { ICodeScrimBrowserPageState, ICodeScrimBrowserThumbnail } from './codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalCommandCluster, ICodeScrimTerminalState } from './codeScrimTerminal.js';
 
@@ -94,7 +94,7 @@ export interface ICodeScrimReplaySurface {
 	applySelections(resource: ICodeScrimWorkspaceResource, selections: readonly ICodeScrimSelection[]): void;
 	applyScroll(resource: ICodeScrimWorkspaceResource, position: ICodeScrimScrollPosition): void;
 	closeResource(resource: ICodeScrimWorkspaceResource): void;
-	showBrowserState(state: ICodeScrimBrowserPageState | undefined): void;
+	showBrowserState(state: ICodeScrimBrowserPageState | undefined, thumbnail?: ICodeScrimBrowserThumbnail): void;
 	clear(): void;
 }
 

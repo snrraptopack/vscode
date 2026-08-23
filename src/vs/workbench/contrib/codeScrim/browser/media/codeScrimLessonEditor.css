@@ -517,12 +517,27 @@
 	background: var(--vscode-toolbar-hoverBackground);
 }
 
-.codescrim-session-browser-replay-host {
-	position: relative;
+.codescrim-session-browser-viewport {
+	display: grid;
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
+	place-items: center;
 	background: var(--vscode-editor-background);
+}
+
+.codescrim-session-browser-viewport img {
+	display: block;
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
+}
+
+.codescrim-session-browser-thumbnail-empty {
+	padding: var(--vscode-spacing-size80);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label3);
+	text-align: center;
 }
 
 .codescrim-session-replay-tabs {

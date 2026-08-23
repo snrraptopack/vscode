@@ -19,7 +19,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
-import { findCodeScrimBrowserState } from '../common/codeScrimBrowser.js';
+import { findCodeScrimBrowserState, findCodeScrimBrowserThumbnail } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
@@ -396,7 +396,8 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		}
 		surface.showBrowserState(this.activeDraft && this._state.status !== 'idle'
 			? findCodeScrimBrowserState(this.activeDraft.browser, this._state.position)
-			: undefined);
+			: undefined,
+			findCodeScrimBrowserThumbnail(this.activeDraft?.browser, this._state.status === 'idle' ? 0 : this._state.position));
 		return toDisposable(() => {
 			if (this.surface === surface) {
 				this.surface = undefined;
@@ -1166,7 +1167,9 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			totalEventCount: this.cursor.totalEventCount,
 		});
 		this.narrationPlayback.update(this._state);
-		this.surface?.showBrowserState(findCodeScrimBrowserState(this.activeDraft.browser, position));
+		this.surface?.showBrowserState(
+			findCodeScrimBrowserState(this.activeDraft.browser, position),
+			findCodeScrimBrowserThumbnail(this.activeDraft.browser, position));
 		this._onDidChangeState.fire(this._state);
 	}
 

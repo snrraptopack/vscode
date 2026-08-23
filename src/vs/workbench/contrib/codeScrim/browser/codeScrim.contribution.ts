@@ -234,15 +234,15 @@ registerAction2(class extends Action2 {
 		});
 	}
 
-	/** Opens (or reveals) the dedicated read-only replay browser and returns its input. */
+	/** Opens (or reveals) the dedicated read-only replay browser beside the lesson and returns its input. */
 	async run(accessor: ServicesAccessor): Promise<BrowserEditorInput | undefined> {
 		const browserViewService = accessor.get(IBrowserViewWorkbenchService);
 		const editorService = accessor.get(IEditorService);
 		const input = browserViewService.getOrCreateLazy('codescrim-replay-browser', {
 			url: 'about:blank',
-			title: localize('codeScrim.replayBrowserTitle', "Lesson Preview"),
+			title: localize('codeScrim.replayBrowserTitle', "Replay Browser"),
 		});
-		await editorService.openEditor(input, { pinned: true });
+		await editorService.openEditor(input, { pinned: true }, SIDE_GROUP);
 		return input;
 	}
 });
