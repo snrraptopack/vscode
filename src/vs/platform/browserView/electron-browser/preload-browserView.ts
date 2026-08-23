@@ -247,6 +247,17 @@ function init() {
 			} catch {
 				return '';
 			}
+		},
+
+		/**
+		 * Scroll the page to an absolute vertical offset in CSS pixels.
+		 */
+		setScrollTop(scrollTop: number): void {
+			try {
+				window.scrollTo({ top: scrollTop, behavior: 'instant' });
+			} catch {
+				// A page can make scrolling fail (e.g. custom scroll hijacking); ignore.
+			}
 		}
 	};
 

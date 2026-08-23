@@ -992,6 +992,21 @@ export class BrowserView extends Disposable {
 	}
 
 	/**
+	 * Scroll the page to an absolute vertical offset in CSS pixels.
+	 * Uses the preloaded isolated-world API so page scripts cannot observe or spoof it.
+	 */
+	async setScrollTop(scrollTop: number): Promise<void> {
+		if (!Number.isFinite(scrollTop) || scrollTop < 0) {
+			return;
+		}
+		try {
+			await this._view.webContents.executeJavaScriptInIsolatedWorld(browserViewIsolatedWorldId, [{ code: `window.browserViewAPI?.setScrollTop?.(${Math.round(scrollTop)})` }]);
+		} catch (error) {
+			this.logService.warn('Failed to scroll browser view webContents.', error);
+		}
+	}
+
+	/**
 	 * Clear all storage data for this browser view's session
 	 */
 	async clearStorage(): Promise<void> {

@@ -631,6 +631,9 @@ export interface IBrowserViewService {
 	 */
 	getSelectedText(id: string): Promise<string>;
 
+	/** Scroll the page of a browser view to an absolute vertical offset in CSS pixels. */
+	setScrollTop(id: string, scrollTop: number): Promise<void>;
+
 	/**
 	 * Clear all storage data for the global browser session
 	 */

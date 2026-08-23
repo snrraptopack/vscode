@@ -415,6 +415,8 @@ export interface IBrowserViewModel extends IDisposable {
 	findInPage(text: string, options?: IBrowserViewFindInPageOptions): Promise<void>;
 	stopFindInPage(keepSelection?: boolean): Promise<void>;
 	getSelectedText(): Promise<string>;
+	/** Scroll the page to an absolute vertical offset in CSS pixels. */
+	setScrollTop(scrollTop: number): Promise<void>;
 	clearStorage(): Promise<void>;
 	setSharedWithAgent(shared: boolean): Promise<boolean>;
 	trustCertificate(host: string, fingerprint: string): Promise<void>;
@@ -770,6 +772,10 @@ export class BrowserViewModel extends Disposable implements IBrowserViewModel {
 
 	async getSelectedText(): Promise<string> {
 		return this.browserViewService.getSelectedText(this.id);
+	}
+
+	async setScrollTop(scrollTop: number): Promise<void> {
+		return this.browserViewService.setScrollTop(this.id, scrollTop);
 	}
 
 	async clearStorage(): Promise<void> {
