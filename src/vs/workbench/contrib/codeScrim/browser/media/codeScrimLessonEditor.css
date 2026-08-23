@@ -517,20 +517,12 @@
 	background: var(--vscode-toolbar-hoverBackground);
 }
 
-.codescrim-session-browser-viewport {
-	display: grid;
+.codescrim-session-browser-replay-host {
+	position: relative;
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
-	place-items: center;
-	background: #fff;
-}
-
-.codescrim-session-browser-viewport img {
-	display: block;
-	max-width: 100%;
-	max-height: 100%;
-	object-fit: contain;
+	background: var(--vscode-editor-background);
 }
 
 .codescrim-session-replay-tabs {

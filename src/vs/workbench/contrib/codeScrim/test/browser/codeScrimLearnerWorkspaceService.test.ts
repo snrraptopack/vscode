@@ -110,11 +110,11 @@ suite('CodeScrimLearnerWorkspaceService', () => {
 		const storageService = disposables.add(new TestStorageService());
 		const environmentService = { workspaceStorageHome: URI.from({ scheme: Schemas.inMemory, path: '/workspace-storage' }) } as IEnvironmentService;
 		const draft = createDraft();
-		const interrupted = new CodeScrimLearnerWorkspaceService(environmentService, fileService, storageService);
+		const interrupted = new CodeScrimLearnerWorkspaceService(environmentService, fileService, new NullLogService(), storageService);
 		await interrupted.reset(draft, draft.checkpoints[0]);
 		const staleRoot = interrupted.workspaceRoot!;
 
-		const recovered = new CodeScrimLearnerWorkspaceService(environmentService, fileService, storageService);
+		const recovered = new CodeScrimLearnerWorkspaceService(environmentService, fileService, new NullLogService(), storageService);
 		await recovered.reset(draft, draft.checkpoints[0]);
 
 		assert.strictEqual(await fileService.exists(staleRoot), false);
@@ -127,7 +127,7 @@ suite('CodeScrimLearnerWorkspaceService', () => {
 		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
 		const storageService = disposables.add(new TestStorageService());
 		const environmentService = { workspaceStorageHome: URI.from({ scheme: Schemas.inMemory, path: '/workspace-storage' }) } as IEnvironmentService;
-		return { fileService, service: new CodeScrimLearnerWorkspaceService(environmentService, fileService, storageService) };
+		return { fileService, service: new CodeScrimLearnerWorkspaceService(environmentService, fileService, new NullLogService(), storageService) };
 	}
 });
 

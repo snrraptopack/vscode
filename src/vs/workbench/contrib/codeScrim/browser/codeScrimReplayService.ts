@@ -19,7 +19,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
-import { findCodeScrimBrowserFrame } from '../common/codeScrimBrowser.js';
+import { findCodeScrimBrowserState } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
@@ -394,8 +394,8 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		if (activeResource && activeModel) {
 			surface.openResource(activeResource, activeModel);
 		}
-		surface.showBrowserFrame(this.activeDraft && this._state.status !== 'idle'
-			? findCodeScrimBrowserFrame(this.activeDraft.browser, this._state.position)
+		surface.showBrowserState(this.activeDraft && this._state.status !== 'idle'
+			? findCodeScrimBrowserState(this.activeDraft.browser, this._state.position)
 			: undefined);
 		return toDisposable(() => {
 			if (this.surface === surface) {
@@ -1166,7 +1166,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			totalEventCount: this.cursor.totalEventCount,
 		});
 		this.narrationPlayback.update(this._state);
-		this.surface?.showBrowserFrame(findCodeScrimBrowserFrame(this.activeDraft.browser, position));
+		this.surface?.showBrowserState(findCodeScrimBrowserState(this.activeDraft.browser, position));
 		this._onDidChangeState.fire(this._state);
 	}
 
@@ -1194,7 +1194,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	private publishIdle(): void {
 		this._state = Object.freeze({ status: 'idle' });
 		this.narrationPlayback.update(this._state);
-		this.surface?.showBrowserFrame(undefined);
+		this.surface?.showBrowserState(undefined);
 		this._onDidChangeState.fire(this._state);
 	}
 

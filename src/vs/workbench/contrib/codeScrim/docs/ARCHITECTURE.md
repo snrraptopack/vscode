@@ -136,11 +136,12 @@ Validates manifests, streams event chunks and media, verifies hashes, and perfor
 ## Browser capture and replay
 
 - The instructor opens the core Integrated Browser through a CodeScrim title-bar action. CodeScrim does not ship or invoke the Simple Browser extension.
-- Recording observes visible native browser-view models and captures navigation metadata plus change-deduplicated JPEG viewport frames on the CodeScrim clock.
-- Browser pixels are content-addressed and encrypted with the rest of the `.scrim`; URLs are metadata rather than replay instructions.
-- Lesson Preview selects the recorded frame at the current replay or seek position and never creates web contents, contacts the network, or starts a server.
+- Recording observes visible native browser-view models and records semantic state events on the CodeScrim clock: navigations, title changes, zoom, device emulation, scroll offsets, page visibility, and page close. Sparse JPEG thumbnails are captured at navigation and recording boundaries for timeline scrubber previews only. CDP is not used for capture or replay.
+- Browser replay reconstructs the recorded page in a real, read-only Integrated Browser: the Lesson Preview re-navigates to the recorded URL and applies recorded zoom/scroll on the session clock. The learner can scroll and inspect the restored page themselves — interactivity over video.
+- Replay is honest about divergence: if a recorded page is no longer reachable or renders differently at replay time, the learner sees the live restoration rather than recorded pixels pretending nothing changed.
+- Browser events and thumbnails are content-addressed and encrypted with the rest of the `.scrim`; URLs are metadata rather than replay instructions.
 - My Preview is a separate native Integrated Browser opened only by learner action. Its history, execution, and network effects are not instructor replay state.
-- The initial frame cadence is an implementation seam. Chromium screencast segments, console events, and network metadata can replace or augment it without changing the passive/live product boundary.
+- Console, network, and interaction domain events can augment the event track without changing the passive/live product boundary.
 
 ## Native UI composition
 

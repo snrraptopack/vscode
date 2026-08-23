@@ -23,8 +23,23 @@ CodeScrim remains a thin, explicit fork of VS Code. Normal upstream synchronizat
 |---|---|---|---|
 | `src/vs/workbench/workbench.desktop.main.ts` | One contribution import | Load native CodeScrim desktop workbench code | Low |
 | `src/vs/platform/browserView/electron-main/browserView.ts` | Explicitly dock BrowserView DevTools on the right | Keep an inspected lesson page and its native DevTools visible together for authoring and capture | Low |
+| `src/vs/platform/browserView/common/browserView.ts` | Add `setScrollTop(id, scrollTop)` to `IBrowserViewService` | Replay must restore the recorded scroll offset of the lesson page without CDP | Low — one method on a large interface |
+| `src/vs/platform/browserView/electron-main/browserView.ts` | Add `BrowserView.setScrollTop(scrollTop)` using the existing isolated-world preload API | Main-process implementation of the scroll restore above; same mechanism as `getSelectedText` | Low |
+| `src/vs/platform/browserView/electron-main/browserViewMainService.ts` | Forward `setScrollTop` over the existing IPC channel | IPC plumbing for the scroll restore above | Very low |
+| `src/vs/platform/browserView/electron-browser/preload-browserView.ts` | Add `setScrollTop` helper to the frozen isolated-world API (`window.browserViewAPI`) | Page-side primitive: `window.scrollTo({ top, behavior: 'instant' })` in the isolated world so page scripts cannot spoof or observe it | Low — additions to the exposed object are backward compatible |
+| `src/vs/workbench/contrib/browserView/common/browserView.ts` | Add `setScrollTop()` to `IBrowserViewModel`/`BrowserViewModel` | Renderer-facing seam so CodeScrim (and any future consumer) can restore page scroll without touching CDP | Low |
 
 All other current product files are CodeScrim-owned files.
+
+### Upstream API history
+
+Each new upstream API is listed with its motivation and what to watch for on merge:
+
+1. **DevTools docking hook** (`platform/browserView/electron-main/browserView.ts`). Forces BrowserView DevTools to dock right instead of floating. Watch for upstream refactors of `BrowserView` construction or DevTools positioning; resolution is to re-apply the one-line option.
+2. **Scroll restore chain** (`setScrollTop`, 2026-08). Five files, one capability. The renderer model method delegates to the platform service, which forwards over IPC to the main-process view, which calls the preloaded isolated-world helper. Motivation: CodeScrim browser replay reconstructs recorded state (navigation, title, zoom, scroll) in a live read-only Integrated Browser. Scroll could not be restored through any existing renderer-facing API — only through CDP, which CodeScrim deliberately retired as a capture/replay foundation. Watch for:
+   - upstream adding a native scroll API to `WebContentsView` handling or `IBrowserViewService` (then this chain collapses into it and the fork hook is removable);
+   - changes to the preload's isolated-world contract (`browserViewIsolatedWorldId`, the frozen `browserViewAPI` object) — a rename here silently breaks `setScrollTop` because the call is an optional-chained string;
+   - Electron behavior changes around `executeJavaScriptInIsolatedWorld` on destroyed/loading frames — the implementation already tolerates failure and logs.
 
 Milestone 1 added only CodeScrim-owned files and did not widen the upstream integration surface.
 
@@ -38,7 +53,7 @@ These are possibilities, not authorization to modify them:
 | Files | `IFileService` | Only if atomic overlay materialization requires a missing operation |
 | Terminal | `ITerminalService`, `ITerminalInstance` events | Only if output causation or snapshot state is unavailable |
 | Debug | `IDebugService` and debug model events | Only if a required state transition is not observable |
-| Browser | `IBrowserViewWorkbenchService`, `IBrowserViewCDPService` | Only if lesson-scoped context or required CDP state is inaccessible |
+| Browser | `IBrowserViewWorkbenchService`, `IBrowserViewModel` events, isolated-world preload helpers | Only if lesson-scoped context or required page state is inaccessible through typed APIs. CDP is not used for capture or replay |
 | Layout | `IEditorGroupsService`, `IWorkbenchLayoutService` | Modify `EditorPart` only after an approved architecture decision |
 | Audio | Existing Electron/media capabilities | Add a platform service only for reliable cross-platform capture |
 
@@ -65,7 +80,7 @@ git config rerere.enabled true
 
 - Did an imported service interface change?
 - Did an event's ordering or lifetime change?
-- Did browser-view IPC or CDP behavior change?
+- Did browser-view IPC or preload isolated-world behavior change?
 - Did editor serialization or group restoration change?
 - Did terminal process/input ownership change?
 - Does the opt-in `VSCODE_CODESCRIM_WORKSPACE_*` PowerShell prompt adapter still wrap the native prompt without changing OSC cwd metadata or non-CodeScrim terminals?

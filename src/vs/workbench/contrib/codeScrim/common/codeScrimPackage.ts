@@ -6,7 +6,7 @@
 import { decodeBase64, encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { URI } from '../../../../base/common/uri.js';
-import { ICodeScrimBrowserFrame, ICodeScrimBrowserTrack } from './codeScrimBrowser.js';
+import { CodeScrimBrowserEventData, ICodeScrimBrowserThumbnail, ICodeScrimBrowserTrack, ICodeScrimBrowserVisibility } from './codeScrimBrowser.js';
 import { ICodeScrimNarrationSegment, ICodeScrimNarrationTrack } from './codeScrimNarration.js';
 import { CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
 import { ICodeScrimTerminalCheckpoint } from './codeScrimTerminal.js';
@@ -26,7 +26,8 @@ const PACKAGE_MAX_EVENT_COUNT = 2_000_000;
 const PACKAGE_MAX_ENTRY_COUNT = 100_000;
 const PACKAGE_MAX_CHECKPOINT_COUNT = 10_000;
 const PACKAGE_MAX_NARRATION_SEGMENT_COUNT = 10_000;
-const PACKAGE_MAX_BROWSER_FRAME_COUNT = 100_000;
+const PACKAGE_MAX_BROWSER_EVENT_COUNT = 200_000;
+const PACKAGE_MAX_BROWSER_THUMBNAIL_COUNT = 10_000;
 const PACKAGE_EVENT_CHUNK_SIZE = 500;
 const PACKAGE_KEY_ALGORITHM = 'AES-GCM';
 const PACKAGE_IV_LENGTH = 12;
@@ -67,7 +68,7 @@ interface ICodeScrimPackagedNarrationSegment extends Omit<ICodeScrimNarrationSeg
 	readonly dataBlob: string;
 }
 
-interface ICodeScrimPackagedBrowserFrame extends Omit<ICodeScrimBrowserFrame, 'data'> {
+interface ICodeScrimPackagedBrowserThumbnail extends Omit<ICodeScrimBrowserThumbnail, 'data'> {
 	readonly dataBlob: string;
 }
 
@@ -94,7 +95,11 @@ interface ICodeScrimPackagePayload {
 		readonly eventCount: number;
 		readonly checkpoints: readonly ICodeScrimPackagedCheckpoint[];
 		readonly eventChunks: readonly ICodeScrimEventChunk[];
-		readonly browser?: Omit<ICodeScrimBrowserTrack, 'frames'> & { readonly frames: readonly ICodeScrimPackagedBrowserFrame[] };
+		readonly browser?: {
+			readonly events: readonly (CodeScrimBrowserEventData & { readonly timestamp: number })[];
+			readonly thumbnails: readonly ICodeScrimPackagedBrowserThumbnail[];
+			readonly visibility: readonly ICodeScrimBrowserVisibility[];
+		};
 		readonly narration?: { readonly segments: readonly ICodeScrimPackagedNarrationSegment[] };
 	};
 	readonly blobs: Readonly<Record<string, string>>;
@@ -256,14 +261,15 @@ export class CodeScrimPackageCodec {
 			}))),
 		} : undefined;
 		const browser = draft.browser ? {
+			events: draft.browser.events,
 			visibility: draft.browser.visibility,
-			frames: await Promise.all(draft.browser.frames.map(async frame => ({
-				timestamp: frame.timestamp,
-				pageId: frame.pageId,
-				url: frame.url,
-				title: frame.title,
-				mimeType: frame.mimeType,
-				dataBlob: await storeBlob(decodeBase64(frame.data).buffer),
+			thumbnails: await Promise.all(draft.browser.thumbnails.map(async thumbnail => ({
+				timestamp: thumbnail.timestamp,
+				pageId: thumbnail.pageId,
+				url: thumbnail.url,
+				title: thumbnail.title,
+				mimeType: thumbnail.mimeType,
+				dataBlob: await storeBlob(decodeBase64(thumbnail.data).buffer),
 			}))),
 		} : undefined;
 
@@ -368,18 +374,22 @@ export class CodeScrimPackageCodec {
 		}
 		let browser: ICodeScrimBrowserTrack | undefined;
 		if (payload.manifest.browser) {
-			const frames: ICodeScrimBrowserFrame[] = [];
-			for (const frame of payload.manifest.browser.frames) {
-				frames.push({
-					timestamp: frame.timestamp,
-					pageId: frame.pageId,
-					url: frame.url,
-					title: frame.title,
-					mimeType: frame.mimeType,
-					data: encodeBase64(await readBlob(frame.dataBlob)),
+			const thumbnails: ICodeScrimBrowserThumbnail[] = [];
+			for (const thumbnail of payload.manifest.browser.thumbnails) {
+				thumbnails.push({
+					timestamp: thumbnail.timestamp,
+					pageId: thumbnail.pageId,
+					url: thumbnail.url,
+					title: thumbnail.title,
+					mimeType: thumbnail.mimeType,
+					data: encodeBase64(await readBlob(thumbnail.dataBlob)),
 				});
 			}
-			browser = { frames, visibility: payload.manifest.browser.visibility };
+			browser = {
+				events: payload.manifest.browser.events,
+				thumbnails,
+				visibility: payload.manifest.browser.visibility,
+			};
 		}
 
 		return {
@@ -466,15 +476,23 @@ function parsePayload(candidate: unknown): ICodeScrimPackagePayload {
 		throw new Error('The CodeScrim package manifest is invalid.');
 	}
 	if (candidate.manifest.browser !== undefined) {
-		if (!isRecord(candidate.manifest.browser) || !Array.isArray(candidate.manifest.browser.frames) ||
-			!Array.isArray(candidate.manifest.browser.visibility) || candidate.manifest.browser.frames.length > PACKAGE_MAX_BROWSER_FRAME_COUNT ||
-			candidate.manifest.browser.visibility.length > PACKAGE_MAX_BROWSER_FRAME_COUNT) {
+		if (!isRecord(candidate.manifest.browser) || !Array.isArray(candidate.manifest.browser.events) ||
+			!Array.isArray(candidate.manifest.browser.thumbnails) || !Array.isArray(candidate.manifest.browser.visibility) ||
+			candidate.manifest.browser.events.length > PACKAGE_MAX_BROWSER_EVENT_COUNT ||
+			candidate.manifest.browser.thumbnails.length > PACKAGE_MAX_BROWSER_THUMBNAIL_COUNT ||
+			candidate.manifest.browser.visibility.length > PACKAGE_MAX_BROWSER_THUMBNAIL_COUNT) {
 			throw new Error('The CodeScrim browser index is invalid.');
 		}
-		for (const frame of candidate.manifest.browser.frames) {
-			if (!isRecord(frame) || !isSafeInteger(frame.timestamp) || frame.timestamp < 0 || !isNonEmptyString(frame.pageId) ||
-				typeof frame.url !== 'string' || typeof frame.title !== 'string' || frame.mimeType !== 'image/jpeg' ||
-				!isNonEmptyString(frame.dataBlob)) {
+		for (const event of candidate.manifest.browser.events) {
+			if (!isRecord(event) || !isSafeInteger(event.timestamp) || event.timestamp < 0 || !isNonEmptyString(event.kind) ||
+				!isRecord(event.payload) || !isNonEmptyString(event.payload.pageId)) {
+				throw new Error('The CodeScrim browser index is invalid.');
+			}
+		}
+		for (const thumbnail of candidate.manifest.browser.thumbnails) {
+			if (!isRecord(thumbnail) || !isSafeInteger(thumbnail.timestamp) || thumbnail.timestamp < 0 || !isNonEmptyString(thumbnail.pageId) ||
+				typeof thumbnail.url !== 'string' || typeof thumbnail.title !== 'string' || thumbnail.mimeType !== 'image/jpeg' ||
+				!isNonEmptyString(thumbnail.dataBlob)) {
 				throw new Error('The CodeScrim browser index is invalid.');
 			}
 		}
@@ -577,18 +595,28 @@ function validateDraft(draft: ICodeScrimRecordingDraft): void {
 		}
 	}
 	if (draft.browser) {
-		if (!Array.isArray(draft.browser.frames) || !Array.isArray(draft.browser.visibility) ||
-			draft.browser.frames.length > PACKAGE_MAX_BROWSER_FRAME_COUNT || draft.browser.visibility.length > PACKAGE_MAX_BROWSER_FRAME_COUNT) {
+		if (!Array.isArray(draft.browser.events) || !Array.isArray(draft.browser.thumbnails) || !Array.isArray(draft.browser.visibility) ||
+			draft.browser.events.length > PACKAGE_MAX_BROWSER_EVENT_COUNT ||
+			draft.browser.thumbnails.length > PACKAGE_MAX_BROWSER_THUMBNAIL_COUNT ||
+			draft.browser.visibility.length > PACKAGE_MAX_BROWSER_THUMBNAIL_COUNT) {
 			throw new Error('The CodeScrim browser track is invalid.');
 		}
-		let previousFrameTimestamp = -1;
-		for (const frame of draft.browser.frames) {
-			if (!isSafeInteger(frame.timestamp) || frame.timestamp < previousFrameTimestamp || frame.timestamp > draft.duration ||
-				!isNonEmptyString(frame.pageId) || typeof frame.url !== 'string' || typeof frame.title !== 'string' ||
-				frame.mimeType !== 'image/jpeg' || !isNonEmptyString(frame.data)) {
+		let previousEventTimestamp = -1;
+		for (const event of draft.browser.events) {
+			if (!isSafeInteger(event.timestamp) || event.timestamp < previousEventTimestamp || event.timestamp > draft.duration ||
+				!isNonEmptyString(event.kind) || !isRecord(event.payload) || !isNonEmptyString(event.payload.pageId)) {
 				throw new Error('The CodeScrim browser track is invalid.');
 			}
-			previousFrameTimestamp = frame.timestamp;
+			previousEventTimestamp = event.timestamp;
+		}
+		let previousThumbnailTimestamp = -1;
+		for (const thumbnail of draft.browser.thumbnails) {
+			if (!isSafeInteger(thumbnail.timestamp) || thumbnail.timestamp < previousThumbnailTimestamp || thumbnail.timestamp > draft.duration ||
+				!isNonEmptyString(thumbnail.pageId) || typeof thumbnail.url !== 'string' || typeof thumbnail.title !== 'string' ||
+				thumbnail.mimeType !== 'image/jpeg' || !isNonEmptyString(thumbnail.data)) {
+				throw new Error('The CodeScrim browser track is invalid.');
+			}
+			previousThumbnailTimestamp = thumbnail.timestamp;
 		}
 		let previousVisibilityTimestamp = -1;
 		for (const visibility of draft.browser.visibility) {

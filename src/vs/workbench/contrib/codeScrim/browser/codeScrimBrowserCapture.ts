@@ -3,28 +3,32 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { mainWindow } from '../../../../base/browser/window.js';
 import { encodeBase64 } from '../../../../base/common/buffer.js';
 import { hash } from '../../../../base/common/hash.js';
-import { Disposable, DisposableMap, DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
-import { ICodeScrimBrowserFrame, ICodeScrimBrowserTrack, ICodeScrimBrowserVisibility } from '../common/codeScrimBrowser.js';
+import { CodeScrimBrowserEventData, ICodeScrimBrowserThumbnail, ICodeScrimBrowserTrack, ICodeScrimBrowserVisibility } from '../common/codeScrimBrowser.js';
 
-const BROWSER_CAPTURE_INTERVAL = 750;
+const THUMBNAIL_FORMAT = 'jpeg';
+const THUMBNAIL_QUALITY = 60;
 
-/** Captures visible Integrated Browser pages as passive, non-executable lesson frames. */
+/**
+ * Records the instructor Integrated Browser as semantic state events plus sparse
+ * scrubber thumbnails. Replay reconstructs the page in a live read-only browser;
+ * recording never captures executable page content and never drives the page.
+ */
 export class CodeScrimBrowserCapture extends Disposable {
 	private readonly pageListeners = this._register(new DisposableMap<string, DisposableStore>());
-	private readonly timer = this._register(new MutableDisposable());
 	private readonly pendingCaptures = new Set<Promise<void>>();
 	private readonly capturingPages = new Set<string>();
-	private readonly frames: ICodeScrimBrowserFrame[] = [];
+	private readonly events: (CodeScrimBrowserEventData & { readonly timestamp: number })[] = [];
+	private readonly thumbnails: ICodeScrimBrowserThumbnail[] = [];
 	private readonly visibility: ICodeScrimBrowserVisibility[] = [];
 	private readonly visiblePages = new Map<string, boolean>();
-	/** Deduplication state per page. Only a cheap content hash is retained, never the frame payload. */
-	private readonly lastFrame = new Map<string, { url: string; title: string; dataHash: number }>();
+	/** Deduplication state per page: only a cheap content hash is retained. */
+	private readonly lastThumbnail = new Map<string, { url: string; title: string; dataHash: number }>();
 	private position: (() => number) | undefined;
 	private active = false;
 	private generation = 0;
@@ -42,17 +46,15 @@ export class CodeScrimBrowserCapture extends Disposable {
 		this.position = position;
 		this.active = true;
 		this.attachKnownPages();
-		this.startTimer();
-		await this.captureVisiblePages(0);
+		await this.captureBoundaryThumbnails(0);
 	}
 
 	async pause(position: number): Promise<void> {
 		if (!this.active) {
 			return;
 		}
-		await this.captureVisiblePages(position);
+		await this.captureBoundaryThumbnails(position);
 		this.active = false;
-		this.timer.clear();
 		await this.waitForPendingCaptures();
 	}
 
@@ -62,24 +64,22 @@ export class CodeScrimBrowserCapture extends Disposable {
 		}
 		this.active = true;
 		this.attachKnownPages();
-		this.startTimer();
-		void this.captureVisiblePages();
 	}
 
 	async finish(position: number): Promise<ICodeScrimBrowserTrack | undefined> {
 		if (this.active) {
-			await this.captureVisiblePages(position);
+			await this.captureBoundaryThumbnails(position);
 		}
 		this.active = false;
-		this.timer.clear();
 		await this.waitForPendingCaptures();
-		if (!this.frames.length) {
+		if (!this.events.length && !this.thumbnails.length && !this.visibility.length) {
 			this.reset();
 			return undefined;
 		}
 
 		const track: ICodeScrimBrowserTrack = Object.freeze({
-			frames: Object.freeze([...this.frames].sort((left, right) => left.timestamp - right.timestamp)),
+			events: Object.freeze([...this.events].sort((left, right) => left.timestamp - right.timestamp)),
+			thumbnails: Object.freeze([...this.thumbnails].sort((left, right) => left.timestamp - right.timestamp)),
 			visibility: Object.freeze([...this.visibility].sort((left, right) => left.timestamp - right.timestamp)),
 		});
 		this.reset();
@@ -94,12 +94,12 @@ export class CodeScrimBrowserCapture extends Disposable {
 		this.generation++;
 		this.active = false;
 		this.position = undefined;
-		this.timer.clear();
 		this.pageListeners.clearAndDisposeAll();
-		this.frames.length = 0;
+		this.events.length = 0;
+		this.thumbnails.length = 0;
 		this.visibility.length = 0;
 		this.visiblePages.clear();
-		this.lastFrame.clear();
+		this.lastThumbnail.clear();
 		this.pendingCaptures.clear();
 		this.capturingPages.clear();
 	}
@@ -121,92 +121,92 @@ export class CodeScrimBrowserCapture extends Disposable {
 				return;
 			}
 			this.recordVisibility(model);
-			if (model.visible) {
-				this.capture(model);
+			if (model.visible && this.active) {
+				this.recordVisibility(model, true);
+				this.captureThumbnail(model);
 			}
 			listeners.add(model.onDidChangeVisibility(() => {
 				this.recordVisibility(model);
-				if (model.visible) {
-					this.capture(model, undefined, true);
+				if (model.visible && this.active) {
+					this.captureThumbnail(model);
 				}
 			}));
 			listeners.add(model.onDidChangeFocus(() => {
 				if (model.focused) {
 					this.recordVisibility(model, true);
-					this.capture(model);
 				}
 			}));
-			listeners.add(model.onDidNavigate(() => this.capture(model, undefined, true)));
-			listeners.add(model.onDidChangeTitle(() => this.capture(model)));
-			listeners.add(model.onDidChangeLoadingState(() => {
-				if (!model.loading) {
-					this.capture(model, undefined, true);
+			listeners.add(model.onDidNavigate(event => {
+				this.append({ kind: 'browser.navigated', payload: { pageId: model.id, url: event.url } });
+				if (model.visible && this.active) {
+					this.captureThumbnail(model);
 				}
 			}));
-			listeners.add(model.onDidClose(() => this.recordVisibility(model, false)));
+			listeners.add(model.onDidChangeTitle(event => this.append({ kind: 'browser.titleChanged', payload: { pageId: model.id, title: event.title } })));
+			listeners.add(model.onDidChangeZoom(() => this.append({ kind: 'browser.zoomChanged', payload: { pageId: model.id, zoomFactor: model.zoomFactor } })));
+			listeners.add(model.onDidChangeDevice(() => this.append({
+				kind: 'browser.deviceChanged',
+				payload: { pageId: model.id, ...(model.device?.width !== undefined ? { width: model.device.width } : {}), ...(model.device?.height !== undefined ? { height: model.device.height } : {}) },
+			})));
+			listeners.add(model.onDidClose(() => {
+				this.recordVisibility(model, false);
+				this.append({ kind: 'browser.pageClosed', payload: { pageId: model.id } });
+				this.pageListeners.deleteAndDispose(model.id);
+			}));
 		}, error => this.logService.warn('[CodeScrim] Could not attach browser capture to an Integrated Browser page.', error));
 	}
 
-	private startTimer(): void {
-		const handle = mainWindow.setInterval(() => void this.captureVisiblePages(), BROWSER_CAPTURE_INTERVAL);
-		this.timer.value = toDisposable(() => mainWindow.clearInterval(handle));
-	}
-
-	private async captureVisiblePages(timestamp?: number): Promise<void> {
+	private append(event: CodeScrimBrowserEventData): void {
 		if (!this.active) {
 			return;
 		}
+		this.events.push(Object.freeze({
+			timestamp: Math.max(0, Math.round(this.position?.() ?? 0)),
+			...event,
+		}) as CodeScrimBrowserEventData & { readonly timestamp: number });
+	}
+
+	/**
+	 * Captures a pinned thumbnail at boundaries the sparse cadence cannot guarantee
+	 * (recording start, pause, stop, navigation): these must exist exactly at their
+	 * clock position even if nothing else changed.
+	 */
+	private async captureBoundaryThumbnails(timestamp: number): Promise<void> {
 		for (const input of this.browserViewService.getKnownBrowserViews().values()) {
-			const model = input.model;
-			if (model?.visible) {
-				this.recordVisibility(model, true, timestamp ?? this.position?.() ?? 0);
-				this.capture(model, timestamp);
+			if (input.model?.visible) {
+				this.captureThumbnail(input.model, timestamp);
 			}
 		}
 		await this.waitForPendingCaptures();
 	}
 
-	/**
-	 * Captures a frame of a visible page. When `timestamp` is given (pause and
-	 * finish boundaries) it pins the frame to that clock position; otherwise the
-	 * frame is stamped with the clock position at the moment the screenshot has
-	 * resolved, because pixels become ready after the request is issued.
-	 */
-	private capture(model: IBrowserViewModel, timestamp?: number, awaitNextPaint = false): void {
+	private captureThumbnail(model: IBrowserViewModel, timestamp?: number): void {
 		if (!this.active || !model.visible || this.capturingPages.has(model.id)) {
 			return;
 		}
 
 		const generation = this.generation;
 		this.capturingPages.add(model.id);
-		const pending = model.captureScreenshot({ format: 'jpeg', quality: 72, awaitNextPaint }).then(screenshot => {
+		const pending = model.captureScreenshot({ format: THUMBNAIL_FORMAT, quality: THUMBNAIL_QUALITY }).then(screenshot => {
 			if (generation !== this.generation) {
 				return;
 			}
 			const data = encodeBase64(screenshot);
 			const dataHash = hash(data);
-			const previous = this.lastFrame.get(model.id);
+			const previous = this.lastThumbnail.get(model.id);
 			if (previous?.dataHash === dataHash && previous.url === model.url && previous.title === model.title) {
 				return;
 			}
-			// The screenshot resolved after the capture was requested, so stamp
-			// the frame with the clock position at the moment pixels were ready.
-			const capturedAt = Math.max(0, Math.round(timestamp ?? this.position?.() ?? 0));
-			const device = model.device;
-			const frame: ICodeScrimBrowserFrame = Object.freeze({
-				timestamp: capturedAt,
+			this.lastThumbnail.set(model.id, { url: model.url, title: model.title, dataHash });
+			this.thumbnails.push(Object.freeze({
+				timestamp: Math.max(0, Math.round(timestamp ?? this.position?.() ?? 0)),
 				pageId: model.id,
 				url: model.url,
 				title: model.title,
-				mimeType: 'image/jpeg',
+				mimeType: 'image/jpeg' as const,
 				data,
-				zoomFactor: model.zoomFactor,
-				...(device?.width !== undefined ? { viewportWidth: device.width } : {}),
-				...(device?.height !== undefined ? { viewportHeight: device.height } : {}),
-			});
-			this.frames.push(frame);
-			this.lastFrame.set(model.id, { url: model.url, title: model.title, dataHash });
-		}, error => this.logService.warn('[CodeScrim] Could not capture an Integrated Browser frame.', error)).finally(() => {
+			}));
+		}, error => this.logService.warn('[CodeScrim] Could not capture an Integrated Browser thumbnail.', error)).finally(() => {
 			this.pendingCaptures.delete(pending);
 			if (generation === this.generation) {
 				this.capturingPages.delete(model.id);

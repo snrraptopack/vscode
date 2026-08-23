@@ -23,6 +23,7 @@ import { ITextModel } from '../../../../editor/common/model.js';
 import { getIconClasses } from '../../../../editor/common/services/getIconClasses.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { localize } from '../../../../nls.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { IEditorOptions } from '../../../../platform/editor/common/editor.js';
@@ -35,7 +36,8 @@ import { IThemeService } from '../../../../platform/theme/common/themeService.js
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { IEditorOpenContext } from '../../../common/editor.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
-import { CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, ICodeScrimBrowserFrame } from '../common/codeScrimBrowser.js';
+import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
+import { CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID, ICodeScrimBrowserPageState } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
@@ -74,10 +76,10 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private diffEditorHost: HTMLElement | undefined;
 	private diffEditor: DiffEditorWidget | undefined;
 	private browserPreview: HTMLElement | undefined;
-	private browserImage: HTMLImageElement | undefined;
 	private browserTitle: HTMLElement | undefined;
 	private browserUrl: HTMLElement | undefined;
-	private browserFrame: ICodeScrimBrowserFrame | undefined;
+	private replayBrowserInput = this._register(new MutableDisposable<BrowserEditorInput>());
+	private browserState: ICodeScrimBrowserPageState | undefined;
 	private browserPreviewSuppressed = false;
 	private navigationRevealButton: HTMLButtonElement | undefined;
 	private contextRevealButton: HTMLButtonElement | undefined;
@@ -115,6 +117,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ILanguageService private readonly languageService: ILanguageService,
+		@ILogService private readonly logService: ILogService,
 		@ICodeScrimLayoutService private readonly layoutService: ICodeScrimLayoutService,
 		@IModelService private readonly modelService: IModelService,
 		@ICodeScrimReplayService private readonly replayService: ICodeScrimReplayService,
@@ -198,12 +201,12 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	}
 
 	async toggleBrowserPanel(): Promise<void> {
-		if (!this.browserFrame) {
+		if (!this.browserState) {
 			await this.commandService.executeCommand(CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID);
 			return;
 		}
 		this.browserPreviewSuppressed = !this.browserPreviewSuppressed;
-		this.renderBrowserFrame();
+		this.renderBrowserState();
 	}
 
 	openResource(resource: ICodeScrimWorkspaceResource, model: ITextModel): void {
@@ -245,20 +248,23 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.codeEditor.setScrollPosition(position, ScrollType.Immediate);
 	}
 
-	showBrowserFrame(frame: ICodeScrimBrowserFrame | undefined): void {
-		if (!frame) {
+	showBrowserState(state: ICodeScrimBrowserPageState | undefined): void {
+		if (!state) {
 			this.browserPreviewSuppressed = false;
 		}
-		if (this.browserFrame === frame) {
-			return;
+		const previous = this.browserState;
+		this.browserState = state;
+		if (previous?.url !== state?.url || previous?.pageId !== state?.pageId) {
+			this.renderBrowserState();
+		} else {
+			// Same page: only metadata may have shifted, keep the live replay browser mounted.
+			this.renderBrowserMetadata();
 		}
-		this.browserFrame = frame;
-		this.renderBrowserFrame();
 	}
 
 	clear(): void {
 		this.dismissExperimentPopover();
-		this.showBrowserFrame(undefined);
+		this.showBrowserState(undefined);
 		this.codeEditor?.setModel(null);
 		this.openedResources.length = 0;
 		this.root?.classList.remove('has-replay-model');
@@ -461,30 +467,77 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		closeButton.appendChild(renderIcon(Codicon.close));
 		this._register(DOM.addDisposableListener(closeButton, DOM.EventType.CLICK, () => {
 			this.browserPreviewSuppressed = true;
-			this.renderBrowserFrame();
+			this.renderBrowserState();
 		}));
 
-		const viewport = DOM.append(preview, DOM.$('.codescrim-session-browser-viewport'));
-		this.browserImage = DOM.append(viewport, DOM.$('img', {
-			alt: localize('codeScrim.recordedBrowserFrame', "Recorded instructor browser frame"),
-		})) as HTMLImageElement;
+		// The replay surface is a real, read-only Integrated Browser. Recorded events
+		// re-drive it on the session clock; the learner can scroll and inspect the
+		// restored page themselves instead of watching recorded pixels.
+		DOM.append(preview, DOM.$('.codescrim-session-browser-replay-host'));
 	}
 
-	private renderBrowserFrame(): void {
-		if (!this.browserPreview || !this.browserImage) {
+	private async ensureReplayBrowser(): Promise<BrowserEditorInput | undefined> {
+		if (this.replayBrowserInput?.value) {
+			return this.replayBrowserInput.value;
+		}
+		try {
+			const input = await this.commandService.executeCommand(CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID) as BrowserEditorInput | undefined;
+			if (input) {
+				this.replayBrowserInput.value = input;
+			}
+			return input;
+		} catch (error) {
+			this.logService.warn('[CodeScrim] Could not open the replay browser.', error);
+			return undefined;
+		}
+	}
+
+	private renderBrowserState(): void {
+		if (!this.browserPreview) {
 			return;
 		}
-		const frame = this.browserFrame;
-		const visible = !!frame && !this.browserPreviewSuppressed;
+		const state = this.browserState;
+		const visible = !!state && !this.browserPreviewSuppressed;
 		this.browserPreview.hidden = !visible;
 		this.root?.classList.toggle('has-browser-preview', visible);
-		if (!visible || !frame) {
-			this.browserImage.removeAttribute('src');
+		if (!visible || !state) {
+			this.renderBrowserMetadata();
 			return;
 		}
-		this.browserTitle!.textContent = frame.title || localize('codeScrim.untitledBrowserPage', "Browser");
-		this.browserUrl!.textContent = frame.url;
-		this.browserImage.src = `data:${frame.mimeType};base64,${frame.data}`;
+		this.renderBrowserMetadata();
+		void this.applyReplayBrowserState(state);
+	}
+
+	private async applyReplayBrowserState(state: ICodeScrimBrowserPageState): Promise<void> {
+		if (!state.url) {
+			return;
+		}
+		const input = await this.ensureReplayBrowser();
+		if (!input || this.browserState !== state) {
+			return;
+		}
+		try {
+			const model = await input.resolve();
+			if (model.url !== state.url) {
+				await model.loadURL(state.url);
+			} else if (state.scrollTop !== undefined) {
+				await model.setScrollTop(state.scrollTop);
+			}
+		} catch (error) {
+			// The recorded page may no longer be reachable at replay time. Lesson preview
+			// stays honest about that instead of pretending the state was restored.
+			this.logService.warn('[CodeScrim] Replay browser could not restore the recorded page state.', error);
+		}
+	}
+
+	private renderBrowserMetadata(): void {
+		const state = this.browserState;
+		if (this.browserTitle) {
+			this.browserTitle.textContent = state?.title || localize('codeScrim.untitledBrowserPage', "Browser");
+		}
+		if (this.browserUrl) {
+			this.browserUrl.textContent = state?.url ?? '';
+		}
 	}
 
 	private createTransport(main: HTMLElement): void {

@@ -94,7 +94,11 @@ function createDraft(): ICodeScrimRecordingDraft {
 		id: 'package-test',
 		duration: 4_000,
 		browser: {
-			frames: [{ timestamp: 750, pageId: 'page-1', url: 'http://localhost:3000', title: 'Lesson', mimeType: 'image/jpeg', data: '/9g=' }],
+			events: [
+				{ timestamp: 600, kind: 'browser.navigated', payload: { pageId: 'page-1', url: 'http://localhost:3000' } },
+				{ timestamp: 800, kind: 'browser.titleChanged', payload: { pageId: 'page-1', title: 'Lesson' } },
+			],
+			thumbnails: [{ timestamp: 750, pageId: 'page-1', url: 'http://localhost:3000', title: 'Lesson', mimeType: 'image/jpeg', data: '/9g=' }],
 			visibility: [{ timestamp: 500, pageId: 'page-1', visible: true }, { timestamp: 2_500, pageId: 'page-1', visible: false }],
 		},
 		narration: {
