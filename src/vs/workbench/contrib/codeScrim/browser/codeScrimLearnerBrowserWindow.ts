@@ -7,7 +7,7 @@ import { Disposable, DisposableStore, MutableDisposable } from '../../../../base
 import { mainWindow } from '../../../../base/browser/window.js';
 import { localize } from '../../../../nls.js';
 import { IAuxiliaryWindow, IAuxiliaryWindowService } from '../../../services/auxiliaryWindow/browser/auxiliaryWindowService.js';
-import { ICodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
+import { ICodeScrimBrowserPageState, ICodeScrimBrowserSnapshot, ICodeScrimBrowserSurfaceEvent } from '../common/codeScrimBrowser.js';
 import { applyCodeScrimBrowserReplayDom } from './codeScrimBrowserReplayDom.js';
 
 /** Owns the passive learner browser replay in a resizable auxiliary window. */
@@ -15,11 +15,14 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 	private readonly windowDisposables = this._register(new MutableDisposable<DisposableStore>());
 	private auxiliaryWindow: IAuxiliaryWindow | undefined;
 	private frame: HTMLIFrameElement | undefined;
+	private tabs: HTMLElement | undefined;
 	private title: HTMLElement | undefined;
 	private address: HTMLInputElement | undefined;
 	private snapshot: ICodeScrimBrowserSnapshot | undefined;
 	private renderedSnapshot: ICodeScrimBrowserSnapshot | undefined;
 	private scrollTop = 0;
+	private pages: readonly ICodeScrimBrowserPageState[] = [];
+	private browserActive = false;
 	private renderedScrollTop = 0;
 	private suppressed = false;
 	private opening: Promise<void> | undefined;
@@ -39,18 +42,26 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 		}
 	}
 
-	show(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop = snapshot?.scrollTop ?? 0): void {
+	show(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop = snapshot?.scrollTop ?? 0, pages: readonly ICodeScrimBrowserPageState[] = [], activeSurface?: ICodeScrimBrowserSurfaceEvent): void {
+		const wasActive = this.browserActive;
 		this.snapshot = snapshot;
 		this.scrollTop = scrollTop;
+		this.pages = pages;
+		this.browserActive = activeSurface ? activeSurface.surface === 'browser' : snapshot !== undefined;
 		if (!snapshot) {
 			this.close(false);
 			return;
 		}
-		if (!this.auxiliaryWindow && !this.suppressed) {
+		if (!this.auxiliaryWindow && !this.suppressed && this.browserActive) {
 			void this.open();
 			return;
 		}
 		this.render();
+		if (!wasActive && this.browserActive) {
+			this.auxiliaryWindow?.window.focus();
+		} else if (wasActive && !this.browserActive) {
+			mainWindow.focus();
+		}
 	}
 
 	async toggle(): Promise<void> {
@@ -127,6 +138,10 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 			void this.openRecordedPage(this.address?.value ?? '');
 		});
 
+		this.tabs = mainWindow.document.createElement('nav');
+		this.tabs.className = 'codescrim-browser-window-tabs';
+		this.tabs.setAttribute('aria-label', localize('codeScrim.recordedBrowserTabs', "Recorded browser tabs"));
+
 		const frame = this.frame = mainWindow.document.createElement('iframe');
 		frame.className = 'codescrim-browser-window-frame';
 		frame.sandbox.add('allow-same-origin');
@@ -135,7 +150,7 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 			this.renderedSnapshot = undefined;
 			this.render();
 		});
-		auxiliaryWindow.container.append(toolbar, frame);
+		auxiliaryWindow.container.append(this.tabs, toolbar, frame);
 		this.render();
 	}
 
@@ -145,6 +160,7 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 		if (!snapshot || !frame) {
 			return;
 		}
+		this.renderTabs();
 		if (this.title) {
 			this.title.textContent = snapshot.title || localize('codeScrim.untitledBrowserPage', "Browser");
 		}
@@ -165,6 +181,24 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 		}
 	}
 
+	private renderTabs(): void {
+		const tabs = this.tabs;
+		if (!tabs) {
+			return;
+		}
+		tabs.textContent = '';
+		for (const page of this.pages) {
+			const tab = mainWindow.document.createElement('button');
+			tab.type = 'button';
+			tab.className = 'codescrim-browser-window-tab';
+			tab.classList.toggle('active', page.active || page.pageId === this.snapshot?.pageId);
+			tab.textContent = page.title || page.url;
+			tab.title = page.url;
+			tab.addEventListener('click', () => void this.openRecordedPage(page.pageId));
+			tabs.appendChild(tab);
+		}
+	}
+
 	private async openRecordedPage(query: string): Promise<void> {
 		const address = this.address;
 		const handled = await this.navigationHandler?.(query);
@@ -179,10 +213,12 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 		this.suppressed = suppress;
 		this.auxiliaryWindow = undefined;
 		this.frame = undefined;
+		this.tabs = undefined;
 		this.title = undefined;
 		this.address = undefined;
 		this.renderedSnapshot = undefined;
 		this.renderedScrollTop = 0;
+		this.browserActive = false;
 		this.windowDisposables.clear();
 	}
 }

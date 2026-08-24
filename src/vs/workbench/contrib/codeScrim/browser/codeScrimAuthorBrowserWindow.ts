@@ -7,6 +7,7 @@ import { getZoomFactor } from '../../../../base/browser/browser.js';
 import { getWindowId } from '../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 import { Codicon } from '../../../../base/common/codicons.js';
+import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableMap, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize } from '../../../../nls.js';
@@ -17,6 +18,8 @@ import { IBrowserViewModel } from '../../browserView/common/browserView.js';
 
 /** Hosts CodeScrim's real Integrated Browser pages without creating editor tabs. */
 export class CodeScrimAuthorBrowserWindow extends Disposable {
+	private readonly _onDidChangePage = this._register(new Emitter<{ readonly kind: 'opened' | 'closed' | 'activated'; readonly pageId: string }>());
+	readonly onDidChangePage: Event<{ readonly kind: 'opened' | 'closed' | 'activated'; readonly pageId: string }> = this._onDidChangePage.event;
 	private readonly windowDisposables = this._register(new MutableDisposable<DisposableStore>());
 	private readonly pageDisposables = this._register(new DisposableMap<string, DisposableStore>());
 	private readonly pages = new Map<string, IBrowserViewModel>();
@@ -35,6 +38,14 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		private readonly auxiliaryWindowService: IAuxiliaryWindowService,
 	) {
 		super();
+	}
+
+	get pageModels(): readonly IBrowserViewModel[] {
+		return [...this.pages.values()];
+	}
+
+	get activeModelId(): string | undefined {
+		return this.activePageId;
 	}
 
 	async open(): Promise<void> {
@@ -81,6 +92,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 			model = await input.resolve();
 			this.pages.set(model.id, model);
 			this.pageOrder.push(model.id);
+			this._onDidChangePage.fire({ kind: 'opened', pageId: model.id });
 			const store = new DisposableStore();
 			this.pageDisposables.set(model.id, store);
 			const refresh = () => {
@@ -168,6 +180,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		}
 		this.renderTabs();
 		this.refreshNavigation();
+		this._onDidChangePage.fire({ kind: 'activated', pageId });
 		if (this.auxiliaryWindow && active) {
 			this.layoutBrowser();
 			void active.setVisible(true);
@@ -241,6 +254,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 
 	private removePage(pageId: string): void {
 		this.pages.delete(pageId);
+		this._onDidChangePage.fire({ kind: 'closed', pageId });
 		this.pageDisposables.deleteAndDispose(pageId);
 		const index = this.pageOrder.indexOf(pageId);
 		if (index >= 0) {

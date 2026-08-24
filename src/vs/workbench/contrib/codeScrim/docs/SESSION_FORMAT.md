@@ -6,7 +6,7 @@ The CodeScrim package is the portable product asset. It must be deterministic, s
 
 ## Container
 
-The implemented `.scrim` v6 format is an opaque binary envelope:
+The implemented `.scrim` v8 format is an opaque binary envelope:
 
 ```text
 magic bytes: CODESCRM
@@ -85,7 +85,7 @@ The first terminal schema records lifecycle, active terminal, raw ANSI output, s
 
 Narration is an optional media track made of self-contained encoded audio segments. Every segment stores its microsecond start, active-timeline duration, MIME type, and a content-addressed audio blob. Pausing closes the current segment and resuming opens another at the same monotonic CodeScrim clock position, so time spent paused is neither recorded nor represented as silence. A recording remains valid when microphone access is unavailable or denied.
 
-Browser replay is an optional passive track with three independently indexed streams: timestamped DOM states, page visibility, and root viewport positions. Visibility identifies which instructor browser page occupied the teaching surface. DOM states are captured through the preloaded isolated-world helper with scripts and event-handler attributes stripped and live form state persisted. Mutation, input, change, and navigation signals create settled DOM states, while scrolling is sampled at animation-frame cadence as small numeric records. DOM states are deduplicated by document, URL, and title and content-addressed into the package blob store. Replay reconciles successive DOM states into one persistent sandboxed document and applies viewport records without rebuilding that document. Replaying or seeking never navigates to the recorded URL or evaluates recorded page scripts.
+Browser replay is an optional passive track with five independently indexed streams: timestamped DOM states, page visibility, root viewport positions, tab lifecycle/navigation metadata, and active teaching-surface changes. Tab records preserve open, close, activation, URL, and title changes without waiting for a complete DOM capture. Surface records distinguish the instructor focusing the browser from returning to the editor, allowing learner playback to foreground the same native window. DOM states are captured through the preloaded isolated-world helper with scripts and event-handler attributes stripped, live form state persisted, and readable stylesheets inlined. Mutation, input, settled pointer interaction, and navigation signals create settled DOM states, while scrolling is sampled at animation-frame cadence as small numeric records. DOM states are deduplicated by document, URL, and title and content-addressed into the package blob store. Replay reconciles successive DOM states into one persistent sandboxed document and applies viewport records without rebuilding that document. Replaying or seeking never navigates to the recorded URL or evaluates recorded page scripts.
 
 The learner timeline derives terminal activity from those command boundaries. Nearby commands collapse into quiet clusters, the activity layer appears only while the native Terminal panel is visible, and command text is revealed only through hover or the selected cluster inspector. Learner experiment markers remain the primary persistent timeline markers.
 

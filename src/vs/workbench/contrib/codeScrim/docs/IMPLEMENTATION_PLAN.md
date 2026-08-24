@@ -97,6 +97,8 @@ Current vertical-slice note: record, stop, recovery across restart, encrypted sa
 - [x] Replay passive instructor browser state in a separate resizable learner auxiliary window without loading recorded URLs or executing page content.
 - [x] Record root viewport scrolling as a lightweight animation-frame-paced track, independent of DOM snapshots.
 - [x] Keep target-blank/popup pages in the standalone instructor browser and record instructor tab activation.
+- [x] Record browser tab open/close/navigation metadata and editor/browser focus as independent timeline streams.
+- [x] Capture committed CodeScrim-owned background pages so external target-blank navigation is available before activation.
 - [x] Capture form values, focus, hover, active state, nested-element scroll, and safe canvas/video paint state with coalesced DOM checkpoints.
 - [x] Let the learner address/search field seek to URLs and titles contained in the recording without issuing a network request.
 - Record structured viewport size, text selection ranges, console, network, download, permission, dialog, and richer pointer metadata through browser model/CDP services.

@@ -40,6 +40,29 @@ export interface ICodeScrimBrowserScroll {
 	readonly scrollTop: number;
 }
 
+/** A structural change to the instructor's browser tab set. */
+export interface ICodeScrimBrowserPageEvent {
+	readonly timestamp: number;
+	readonly pageId: string;
+	readonly kind: 'opened' | 'closed' | 'activated' | 'updated';
+	readonly url?: string;
+	readonly title?: string;
+}
+
+/** Which top-level teaching surface held the instructor's attention. */
+export interface ICodeScrimBrowserSurfaceEvent {
+	readonly timestamp: number;
+	readonly surface: 'workbench' | 'browser';
+	readonly pageId?: string;
+}
+
+export interface ICodeScrimBrowserPageState {
+	readonly pageId: string;
+	readonly url: string;
+	readonly title: string;
+	readonly active: boolean;
+}
+
 /**
  * Passive browser recording. Snapshots reconstruct the recorded DOM in the
  * lesson surface; the learner interacts with the same surface, so instructor
@@ -49,6 +72,64 @@ export interface ICodeScrimBrowserTrack {
 	readonly snapshots: readonly ICodeScrimBrowserSnapshot[];
 	readonly visibility: readonly ICodeScrimBrowserVisibility[];
 	readonly scrolls: readonly ICodeScrimBrowserScroll[];
+	readonly pages: readonly ICodeScrimBrowserPageEvent[];
+	readonly surfaces: readonly ICodeScrimBrowserSurfaceEvent[];
+}
+
+/** Resolves the browser tabs that existed at a timeline position. */
+export function findCodeScrimBrowserPages(track: ICodeScrimBrowserTrack | undefined, position: number): readonly ICodeScrimBrowserPageState[] {
+	if (!track) {
+		return [];
+	}
+	const open = new Map<string, { url: string; title: string; timestamp: number }>();
+	let activePageId: string | undefined;
+	for (const event of track.pages) {
+		if (event.timestamp > position) {
+			break;
+		}
+		switch (event.kind) {
+			case 'opened':
+				open.set(event.pageId, { url: event.url ?? 'about:blank', title: event.title ?? '', timestamp: event.timestamp });
+				break;
+			case 'closed':
+				open.delete(event.pageId);
+				if (activePageId === event.pageId) {
+					activePageId = undefined;
+				}
+				break;
+			case 'activated':
+				if (open.has(event.pageId)) {
+					activePageId = event.pageId;
+				}
+				break;
+			case 'updated': {
+				const page = open.get(event.pageId);
+				if (page) {
+					open.set(event.pageId, { url: event.url ?? page.url, title: event.title ?? page.title, timestamp: event.timestamp });
+				}
+				break;
+			}
+		}
+	}
+	return [...open.entries()].map(([pageId, page]) => {
+		const snapshot = findLatestPageSnapshot(track.snapshots, position, pageId);
+		const snapshotIsNewer = snapshot && snapshot.timestamp >= page.timestamp;
+		return {
+			pageId,
+			url: snapshotIsNewer ? snapshot.url : page.url || snapshot?.url || 'about:blank',
+			title: snapshotIsNewer ? snapshot.title : page.title || snapshot?.title || '',
+			active: pageId === activePageId,
+		};
+	});
+}
+
+/** Resolves whether playback should foreground the editor or browser window. */
+export function findCodeScrimActiveSurface(track: ICodeScrimBrowserTrack | undefined, position: number): ICodeScrimBrowserSurfaceEvent | undefined {
+	if (!track) {
+		return undefined;
+	}
+	const index = findLastTimestamp(track.surfaces, position);
+	return index < 0 ? undefined : track.surfaces[index];
 }
 
 /** Resolves the instructor browser page visible at a timeline position. */
@@ -124,4 +205,13 @@ function findLastTimestamp(entries: readonly { readonly timestamp: number }[], p
 		}
 	}
 	return result;
+}
+
+function findLatestPageSnapshot(snapshots: readonly ICodeScrimBrowserSnapshot[], position: number, pageId: string): ICodeScrimBrowserSnapshot | undefined {
+	for (let index = findLastTimestamp(snapshots, position); index >= 0; index--) {
+		if (snapshots[index].pageId === pageId) {
+			return snapshots[index];
+		}
+	}
+	return undefined;
 }

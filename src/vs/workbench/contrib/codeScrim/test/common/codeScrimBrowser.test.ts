@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot, findCodeScrimVisiblePage, ICodeScrimBrowserTrack } from '../../common/codeScrimBrowser.js';
+import { findCodeScrimActiveSurface, findCodeScrimBrowserPages, findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot, findCodeScrimVisiblePage, ICodeScrimBrowserTrack } from '../../common/codeScrimBrowser.js';
 
 suite('CodeScrimBrowser', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -25,6 +25,17 @@ suite('CodeScrimBrowser', () => {
 			{ timestamp: 110, pageId: 'one', scrollLeft: 0, scrollTop: 20 },
 			{ timestamp: 250, pageId: 'one', scrollLeft: 0, scrollTop: 220 },
 			{ timestamp: 510, pageId: 'two', scrollLeft: 0, scrollTop: 80 },
+		],
+		pages: [
+			{ timestamp: 40, pageId: 'one', kind: 'opened' },
+			{ timestamp: 50, pageId: 'one', kind: 'activated' },
+			{ timestamp: 440, pageId: 'two', kind: 'opened' },
+			{ timestamp: 450, pageId: 'two', kind: 'activated' },
+		],
+		surfaces: [
+			{ timestamp: 50, surface: 'browser', pageId: 'one' },
+			{ timestamp: 400, surface: 'workbench' },
+			{ timestamp: 450, surface: 'browser', pageId: 'two' },
 		],
 	};
 
@@ -65,10 +76,24 @@ suite('CodeScrimBrowser', () => {
 				{ timestamp: 420, pageId: 'two', visible: true },
 			],
 			scrolls: [],
+			pages: [],
+			surfaces: [],
 		};
 
 		assert.strictEqual(findCodeScrimBrowserSnapshot(partial, 430)?.html, '<html>one-a</html>');
 		assert.strictEqual(findCodeScrimVisiblePage(partial, 25), undefined);
+	});
+
+	test('resolves tab structure and active teaching surface', () => {
+		assert.deepStrictEqual(findCodeScrimBrowserPages(track, 200), [
+			{ pageId: 'one', url: 'http://one', title: 'One', active: true },
+		]);
+		assert.deepStrictEqual(findCodeScrimBrowserPages(track, 600), [
+			{ pageId: 'one', url: 'http://one', title: 'One', active: false },
+			{ pageId: 'two', url: 'http://two', title: 'Two', active: true },
+		]);
+		assert.strictEqual(findCodeScrimActiveSurface(track, 425)?.surface, 'workbench');
+		assert.strictEqual(findCodeScrimActiveSurface(track, 600)?.pageId, 'two');
 	});
 
 	test('resolves viewport movement independently of DOM snapshots', () => {

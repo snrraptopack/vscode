@@ -18,6 +18,10 @@
 	grid-template-rows: 36px 48px minmax(0, 1fr);
 }
 
+.codescrim-browser-replay-window {
+	grid-template-rows: 36px 48px minmax(0, 1fr);
+}
+
 .codescrim-browser-window-tabs {
 	-webkit-app-region: drag;
 	display: flex;

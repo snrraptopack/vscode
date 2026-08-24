@@ -57,16 +57,26 @@ function init() {
 	});
 	document.addEventListener('input', reportContentChange, true);
 	document.addEventListener('change', reportContentChange, true);
-	document.addEventListener('pointerover', reportContentChange, true);
-	document.addEventListener('pointerout', reportContentChange, true);
-	document.addEventListener('pointerdown', reportContentChange, true);
-	document.addEventListener('pointerup', reportContentChange, true);
 	document.addEventListener('focusin', reportContentChange, true);
 	document.addEventListener('focusout', reportContentChange, true);
-	document.addEventListener('selectionchange', reportContentChange, true);
-	window.addEventListener('resize', reportContentChange, true);
 	window.addEventListener('transitionend', reportContentChange, true);
 	window.addEventListener('animationend', reportContentChange, true);
+	// Hover and pressed states matter visually, but serializing a complete large
+	// page on every pointer boundary can freeze both recording and replay. Capture
+	// only after the pointer has settled on one interaction target.
+	let interactionChangeTimer: ReturnType<typeof setTimeout> | undefined;
+	const reportSettledInteraction = () => {
+		if (interactionChangeTimer !== undefined) {
+			clearTimeout(interactionChangeTimer);
+		}
+		interactionChangeTimer = setTimeout(() => {
+			interactionChangeTimer = undefined;
+			reportContentChange();
+		}, 300);
+	};
+	document.addEventListener('pointerover', reportSettledInteraction, true);
+	document.addEventListener('pointerout', reportSettledInteraction, true);
+	document.addEventListener('pointerup', reportSettledInteraction, true);
 
 	// Scrolling is high frequency but does not mutate the document. Report it on
 	// its own animation-frame paced channel so consumers can record viewport
@@ -313,7 +323,7 @@ function init() {
 		 * Runs in the isolated world, so page scripts cannot tamper with the
 		 * serialization functions themselves.
 		 */
-		captureDomSnapshot(): { html: string; scrollY: number; title: string; url: string } | undefined {
+		async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined> {
 			try {
 				const clone = document.documentElement.cloneNode(true) as HTMLElement;
 				const sourceElements = document.documentElement.querySelectorAll('*');
@@ -356,6 +366,7 @@ function init() {
 					const base = clone.ownerDocument.createElement('base');
 					base.setAttribute('href', document.baseURI);
 					head.prepend(base);
+					await inlineReplayStyleSheets(clone);
 					const interactionStyles = captureInteractionStyles();
 					if (interactionStyles) {
 						const style = clone.ownerDocument.createElement('style');
@@ -2490,6 +2501,66 @@ function captureInteractionStyles(): string {
 		}
 	}
 	return captured.join('\n');
+}
+
+const replayStyleSheetCache = new Map<string, Promise<string | undefined>>();
+
+/**
+ * Replaces external stylesheet links with captured CSS whenever the page lets
+ * the isolated world read or fetch it. This keeps replay styling independent
+ * from the learner's network and avoids the workbench CSP dropping remote
+ * styles from a passive srcdoc document.
+ */
+async function inlineReplayStyleSheets(clone: HTMLElement): Promise<void> {
+	const sourceLinks = [...document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]')];
+	const replayLinks = [...clone.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]')];
+	await Promise.all(sourceLinks.map(async (source, index) => {
+		const replay = replayLinks[index];
+		if (!replay) {
+			return;
+		}
+		const href = source.href;
+		let css: string | undefined;
+		try {
+			css = [...(source.sheet?.cssRules ?? [])].map(rule => rule.cssText).join('\n');
+		} catch {
+			// Cross-origin sheets may still opt into fetch through CORS.
+		}
+		if (!css && href) {
+			let request = replayStyleSheetCache.get(href);
+			if (!request) {
+				request = fetch(href, { credentials: 'include' })
+					.then(response => response.ok ? response.text() : undefined)
+					.catch(() => undefined);
+				replayStyleSheetCache.set(href, request);
+			}
+			css = await request;
+		}
+		if (!css) {
+			return;
+		}
+		const style = clone.ownerDocument.createElement('style');
+		style.setAttribute('data-vscode-codescrim-stylesheet', href);
+		if (source.media) {
+			style.media = source.media;
+		}
+		style.textContent = absolutizeCssUrls(css, href);
+		replay.replaceWith(style);
+	}));
+}
+
+function absolutizeCssUrls(css: string, styleSheetUrl: string): string {
+	return css.replace(/url\(\s*(['"]?)([^'"\)]+)\1\s*\)/gi, (match, quote: string, value: string) => {
+		const trimmed = value.trim();
+		if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('#')) {
+			return match;
+		}
+		try {
+			return `url(${quote}${new URL(trimmed, styleSheetUrl).href}${quote})`;
+		} catch {
+			return match;
+		}
+	});
 }
 
 init();

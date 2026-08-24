@@ -4,12 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Limiter, ThrottledDelayer } from '../../../../base/common/async.js';
+import { addDisposableListener } from '../../../../base/browser/dom.js';
+import { mainWindow } from '../../../../base/browser/window.js';
 import { hash } from '../../../../base/common/hash.js';
 import { Disposable, DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
-import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
-import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
-import { ICodeScrimBrowserScroll, ICodeScrimBrowserSnapshot, ICodeScrimBrowserTrack, ICodeScrimBrowserVisibility } from '../common/codeScrimBrowser.js';
+import { IBrowserViewModel } from '../../browserView/common/browserView.js';
+import { ICodeScrimBrowserPageEvent, ICodeScrimBrowserScroll, ICodeScrimBrowserSnapshot, ICodeScrimBrowserSurfaceEvent, ICodeScrimBrowserTrack, ICodeScrimBrowserVisibility } from '../common/codeScrimBrowser.js';
+import { ICodeScrimBrowserWindowService } from './codeScrimBrowserWindowService.js';
 
 const SNAPSHOT_SETTLE_DELAY_MS = 120;
 const SNAPSHOT_MAX_PENDING = 2;
@@ -26,6 +28,8 @@ export class CodeScrimBrowserCapture extends Disposable {
 	private readonly events: ICodeScrimBrowserSnapshot[] = [];
 	private readonly visibility: ICodeScrimBrowserVisibility[] = [];
 	private readonly scrolls: ICodeScrimBrowserScroll[] = [];
+	private readonly pages: ICodeScrimBrowserPageEvent[] = [];
+	private readonly surfaces: ICodeScrimBrowserSurfaceEvent[] = [];
 	private readonly visiblePages = new Map<string, boolean>();
 	private readonly lastSnapshotHash = new Map<string, number>();
 	private readonly lastScroll = new Map<string, { readonly left: number; readonly top: number }>();
@@ -34,11 +38,18 @@ export class CodeScrimBrowserCapture extends Disposable {
 	private generation = 0;
 
 	constructor(
-		private readonly browserViewService: IBrowserViewWorkbenchService,
+		private readonly browserWindowService: ICodeScrimBrowserWindowService,
 		private readonly logService: ILogService,
 	) {
 		super();
-		this._register(this.browserViewService.onDidChangeBrowserViews(() => this.attachKnownPages()));
+		this._register(this.browserWindowService.onDidChangeAuthorPage(event => {
+			if (event.kind === 'opened') {
+				this.attachKnownPages();
+			}
+			const model = this.browserWindowService.authorPageModels.find(candidate => candidate.id === event.pageId);
+			this.recordPage(event.kind, event.pageId, undefined, model);
+		}));
+		this._register(addDisposableListener(mainWindow, 'focus', () => this.recordSurface('workbench')));
 	}
 
 	async start(position: () => number): Promise<void> {
@@ -46,6 +57,15 @@ export class CodeScrimBrowserCapture extends Disposable {
 		this.position = position;
 		this.active = true;
 		this.attachKnownPages();
+		for (const model of this.browserWindowService.authorPageModels) {
+			this.recordPage('opened', model.id, 0, model);
+		}
+		if (this.browserWindowService.activeAuthorPageId) {
+			const model = this.browserWindowService.authorPageModels.find(candidate => candidate.id === this.browserWindowService.activeAuthorPageId);
+			this.recordPage('activated', this.browserWindowService.activeAuthorPageId, 0, model);
+		}
+		const focused = this.browserWindowService.authorPageModels.find(model => model.focused);
+		this.recordSurface(focused ? 'browser' : 'workbench', focused?.id, 0);
 		await this.captureAllSnapshots(0);
 	}
 
@@ -70,7 +90,7 @@ export class CodeScrimBrowserCapture extends Disposable {
 			await this.captureAllSnapshots(position);
 		}
 		this.active = false;
-		if (!this.events.length && !this.visibility.length && !this.scrolls.length) {
+		if (!this.events.length && !this.visibility.length && !this.scrolls.length && !this.pages.length) {
 			this.reset();
 			return undefined;
 		}
@@ -79,6 +99,8 @@ export class CodeScrimBrowserCapture extends Disposable {
 			snapshots: Object.freeze([...this.events].sort((left, right) => left.timestamp - right.timestamp)),
 			visibility: Object.freeze([...this.visibility].sort((left, right) => left.timestamp - right.timestamp)),
 			scrolls: Object.freeze([...this.scrolls].sort((left, right) => left.timestamp - right.timestamp)),
+			pages: Object.freeze([...this.pages].sort((left, right) => left.timestamp - right.timestamp)),
+			surfaces: Object.freeze([...this.surfaces].sort((left, right) => left.timestamp - right.timestamp)),
 		});
 		this.reset();
 		return track;
@@ -96,64 +118,66 @@ export class CodeScrimBrowserCapture extends Disposable {
 		this.events.length = 0;
 		this.visibility.length = 0;
 		this.scrolls.length = 0;
+		this.pages.length = 0;
+		this.surfaces.length = 0;
 		this.visiblePages.clear();
 		this.lastSnapshotHash.clear();
 		this.lastScroll.clear();
 	}
 
 	private attachKnownPages(): void {
-		for (const input of this.browserViewService.getKnownBrowserViews().values()) {
-			this.attachPage(input);
+		for (const model of this.browserWindowService.authorPageModels) {
+			this.attachPage(model);
 		}
 	}
 
-	private attachPage(input: BrowserEditorInput): void {
-		if (this.pageListeners.has(input.id)) {
+	private attachPage(model: IBrowserViewModel): void {
+		if (this.pageListeners.has(model.id)) {
 			return;
 		}
 		const listeners = new DisposableStore();
 		const snapshotDelayer = listeners.add(new ThrottledDelayer<void>(SNAPSHOT_SETTLE_DELAY_MS));
-		this.pageListeners.set(input.id, listeners);
-		void input.resolve().then(model => {
-			if (!this.pageListeners.has(input.id)) {
-				return;
-			}
+		this.pageListeners.set(model.id, listeners);
+		this.recordVisibility(model);
+		if (model.visible && this.active) {
+			this.recordVisibility(model, true);
+			this.captureSnapshot(model, snapshotDelayer);
+		}
+		listeners.add(model.onDidChangeVisibility(() => {
 			this.recordVisibility(model);
 			if (model.visible && this.active) {
-				this.recordVisibility(model, true);
 				this.captureSnapshot(model, snapshotDelayer);
 			}
-			listeners.add(model.onDidChangeVisibility(() => {
-				this.recordVisibility(model);
-				if (model.visible && this.active) {
-					this.captureSnapshot(model, snapshotDelayer);
-				}
-			}));
+		}));
 			listeners.add(model.onDidChangeFocus(() => {
 				if (model.focused) {
 					this.recordVisibility(model, true);
+					this.recordPage('activated', model.id);
+					this.recordSurface('browser', model.id);
 				}
 			}));
 			listeners.add(model.onDidNavigate(() => {
+				this.recordPage('updated', model.id, undefined, model);
 				// Full navigations are captured after loading. Same-document and SPA
 				// navigations do not necessarily enter a loading state, so retain their
 				// URL and current DOM as a timeline state too.
-				if (!model.loading && model.visible && this.active) {
-					this.captureSnapshot(model, snapshotDelayer);
+				if (!model.loading && this.active) {
+					this.captureSnapshot(model, snapshotDelayer, true);
 				}
 			}));
+			listeners.add(model.onDidChangeTitle(() => this.recordPage('updated', model.id, undefined, model)));
 			listeners.add(model.onDidChangeContent(() => this.captureSnapshot(model, snapshotDelayer)));
 			listeners.add(model.onDidScroll(event => this.recordScroll(model.id, event.scrollX, event.scrollY)));
 			listeners.add(model.onDidChangeLoadingState(() => {
-				if (!model.loading && model.visible && this.active) {
-					this.captureSnapshot(model, snapshotDelayer);
+				if (!model.loading && this.active) {
+					this.recordPage('updated', model.id, undefined, model);
+					this.captureSnapshot(model, snapshotDelayer, true);
 				}
 			}));
 			listeners.add(model.onDidClose(() => {
 				this.recordVisibility(model, false);
 				this.pageListeners.deleteAndDispose(model.id);
 			}));
-		}, error => this.logService.warn('[CodeScrim] Could not attach browser capture to an Integrated Browser page.', error));
 	}
 
 	/**
@@ -162,16 +186,14 @@ export class CodeScrimBrowserCapture extends Disposable {
 	 */
 	private async captureAllSnapshots(timestamp: number): Promise<void> {
 		const captures: Promise<void>[] = [];
-		for (const input of this.browserViewService.getKnownBrowserViews().values()) {
-			if (input.model?.visible) {
-				captures.push(this.snapshotLimiter.queue(() => this.captureSnapshotNow(input.model!, undefined, timestamp)));
-			}
+		for (const model of this.browserWindowService.authorPageModels) {
+			captures.push(this.snapshotLimiter.queue(() => this.captureSnapshotNow(model, undefined, timestamp)));
 		}
 		await Promise.all(captures);
 	}
 
-	private captureSnapshot(model: IBrowserViewModel, delayer: ThrottledDelayer<void>): void {
-		if (!this.active || !model.visible) {
+	private captureSnapshot(model: IBrowserViewModel, delayer: ThrottledDelayer<void>, includeBackground = false): void {
+		if (!this.active || (!includeBackground && !model.visible)) {
 			return;
 		}
 		const generation = this.generation;
@@ -234,6 +256,40 @@ export class CodeScrimBrowserCapture extends Disposable {
 			timestamp: Math.max(0, Math.round(timestamp)),
 			pageId: model.id,
 			visible,
+		}));
+	}
+
+	private recordPage(kind: ICodeScrimBrowserPageEvent['kind'], pageId: string, timestamp = this.position?.() ?? 0, model?: IBrowserViewModel): void {
+		if (!this.active) {
+			return;
+		}
+		const previous = this.pages.at(-1);
+		const url = model?.url || undefined;
+		const title = model?.title || undefined;
+		if (previous?.kind === kind && previous.pageId === pageId && previous.url === url && previous.title === title) {
+			return;
+		}
+		this.pages.push(Object.freeze({
+			timestamp: Math.max(0, Math.round(timestamp)),
+			pageId,
+			kind,
+			...(url ? { url } : {}),
+			...(title ? { title } : {}),
+		}));
+	}
+
+	private recordSurface(surface: ICodeScrimBrowserSurfaceEvent['surface'], pageId?: string, timestamp = this.position?.() ?? 0): void {
+		if (!this.active) {
+			return;
+		}
+		const previous = this.surfaces.at(-1);
+		if (previous?.surface === surface && previous.pageId === pageId) {
+			return;
+		}
+		this.surfaces.push(Object.freeze({
+			timestamp: Math.max(0, Math.round(timestamp)),
+			surface,
+			...(pageId ? { pageId } : {}),
 		}));
 	}
 }

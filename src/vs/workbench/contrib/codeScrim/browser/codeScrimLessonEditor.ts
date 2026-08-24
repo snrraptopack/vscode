@@ -35,7 +35,7 @@ import { IThemeService } from '../../../../platform/theme/common/themeService.js
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { IEditorOpenContext } from '../../../common/editor.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
-import { ICodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
+import { ICodeScrimBrowserPageState, ICodeScrimBrowserSnapshot, ICodeScrimBrowserSurfaceEvent } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
@@ -272,8 +272,8 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}
 	}
 
-	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop = snapshot?.scrollTop ?? 0): void {
-		this.browserWindowService.showLearnerSnapshot(snapshot, scrollTop);
+	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop = snapshot?.scrollTop ?? 0, pages?: readonly ICodeScrimBrowserPageState[], activeSurface?: ICodeScrimBrowserSurfaceEvent): void {
+		this.browserWindowService.showLearnerSnapshot(snapshot, scrollTop, pages, activeSurface);
 	}
 
 	clear(preserveBrowser = false): void {

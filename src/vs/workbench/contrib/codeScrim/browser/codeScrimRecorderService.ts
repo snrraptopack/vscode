@@ -25,12 +25,12 @@ import { IEditorService } from '../../../services/editor/common/editorService.js
 import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
 import { ITerminalService } from '../../terminal/browser/terminal.js';
-import { IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
 import { ICodeScrimPackageService } from '../common/codeScrimPackage.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEventData, CodeScrimRecordingState, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimNarrationCapture } from './codeScrimNarrationCapture.js';
 import { CodeScrimBrowserCapture } from './codeScrimBrowserCapture.js';
 import { CodeScrimTerminalRecorder } from './codeScrimTerminalRecorder.js';
+import { ICodeScrimBrowserWindowService } from './codeScrimBrowserWindowService.js';
 
 const MAX_CHECKPOINT_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_CHECKPOINT_TOTAL_SIZE = 64 * 1024 * 1024;
@@ -79,7 +79,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		@ILogService private readonly logService: ILogService,
 		@IModelService private readonly modelService: IModelService,
 		@INotificationService notificationService: INotificationService,
-		@IBrowserViewWorkbenchService browserViewService: IBrowserViewWorkbenchService,
+		@ICodeScrimBrowserWindowService browserWindowService: ICodeScrimBrowserWindowService,
 		@ICodeScrimPackageService private readonly packageService: ICodeScrimPackageService,
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
 		@ITextFileService private readonly textFileService: ITextFileService,
@@ -90,7 +90,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		super();
 		this.terminalRecorder = new CodeScrimTerminalRecorder(terminalService, event => this.append(event));
 		this.narrationCapture = this._register(new CodeScrimNarrationCapture(notificationService, logService));
-		this.browserCapture = this._register(new CodeScrimBrowserCapture(browserViewService, logService));
+		this.browserCapture = this._register(new CodeScrimBrowserCapture(browserWindowService, logService));
 		this.syncStatusbar();
 	}
 
