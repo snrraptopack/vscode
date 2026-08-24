@@ -7,7 +7,7 @@ import { Event } from '../../../../base/common/event.js';
 import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { ICodeScrimBrowserPageState, ICodeScrimBrowserThumbnail } from './codeScrimBrowser.js';
+import { ICodeScrimBrowserSnapshot } from './codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalCommandCluster, ICodeScrimTerminalState } from './codeScrimTerminal.js';
 
@@ -94,8 +94,9 @@ export interface ICodeScrimReplaySurface {
 	applySelections(resource: ICodeScrimWorkspaceResource, selections: readonly ICodeScrimSelection[]): void;
 	applyScroll(resource: ICodeScrimWorkspaceResource, position: ICodeScrimScrollPosition): void;
 	closeResource(resource: ICodeScrimWorkspaceResource): void;
-	showBrowserState(state: ICodeScrimBrowserPageState | undefined, thumbnail?: ICodeScrimBrowserThumbnail): void;
-	clear(): void;
+	previewResource(resource: ICodeScrimWorkspaceResource, model: ITextModel, selections?: readonly ICodeScrimSelection[], scrollPosition?: ICodeScrimScrollPosition): void;
+	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined): void;
+	clear(preserveBrowser?: boolean): void;
 }
 
 export interface ICodeScrimLearnerConflict {
@@ -298,6 +299,8 @@ export interface ICodeScrimReplayService {
 
 	replay(draft: ICodeScrimRecordingDraft): Promise<boolean>;
 	restart(): Promise<boolean>;
+	/** Preview the browser track without rebuilding the learner workspace. */
+	preview(position: number): void;
 	seek(position: number): Promise<void>;
 	pause(): Promise<void>;
 	beginLearnerEdit(): void;

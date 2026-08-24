@@ -517,27 +517,20 @@
 	background: var(--vscode-toolbar-hoverBackground);
 }
 
-.codescrim-session-browser-viewport {
-	display: grid;
+.codescrim-session-browser-frame-host {
+	position: relative;
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
-	place-items: center;
-	background: var(--vscode-editor-background);
+	background: #fff;
 }
 
-.codescrim-session-browser-viewport img {
+.codescrim-session-browser-frame {
 	display: block;
-	max-width: 100%;
-	max-height: 100%;
-	object-fit: contain;
-}
-
-.codescrim-session-browser-thumbnail-empty {
-	padding: var(--vscode-spacing-size80);
-	color: var(--vscode-descriptionForeground);
-	font-size: var(--vscode-fontSize-label3);
-	text-align: center;
+	width: 100%;
+	height: 100%;
+	border: 0;
+	background: #fff;
 }
 
 .codescrim-session-replay-tabs {

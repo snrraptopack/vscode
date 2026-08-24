@@ -478,6 +478,7 @@ export interface IBrowserViewService {
 	 */
 	onDynamicDidNavigate(id: string): Event<IBrowserViewNavigationEvent>;
 	onDynamicDidChangeLoadingState(id: string): Event<IBrowserViewLoadingEvent>;
+	onDynamicDidChangeContent(id: string): Event<void>;
 	onDynamicDidChangeFocus(id: string): Event<IBrowserViewFocusEvent>;
 	onDynamicDidChangeVisibility(id: string): Event<IBrowserViewVisibilityEvent>;
 	onDynamicDidChangeDevToolsState(id: string): Event<IBrowserViewDevToolsStateEvent>;
@@ -631,8 +632,11 @@ export interface IBrowserViewService {
 	 */
 	getSelectedText(id: string): Promise<string>;
 
-	/** Scroll the page of a browser view to an absolute vertical offset in CSS pixels. */
-	setScrollTop(id: string, scrollTop: number): Promise<void>;
+	/**
+	 * Serialize the current DOM state of a browser view's page for passive replay.
+	 * Returns undefined when the page is loading or the frame is gone.
+	 */
+	captureDomSnapshot(id: string): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined>;
 
 	/**
 	 * Clear all storage data for the global browser session

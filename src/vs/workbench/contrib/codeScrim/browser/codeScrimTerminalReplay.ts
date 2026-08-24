@@ -27,4 +27,12 @@ export class CodeScrimTerminalReplay extends Disposable {
 		this.stateStore.apply(event);
 		this._onDidChangeState.fire(this.state);
 	}
+
+	preview(state: ICodeScrimTerminalState, events: readonly CodeScrimTerminalEvent[]): void {
+		this.stateStore.reset(state);
+		for (const event of events) {
+			this.stateStore.apply(event);
+		}
+		this._onDidChangeState.fire(this.state);
+	}
 }

@@ -165,6 +165,10 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
 		return this._getBrowserView(id).onDidChangeLoadingState;
 	}
 
+	onDynamicDidChangeContent(id: string) {
+		return this._getBrowserView(id).onDidChangeContent;
+	}
+
 	onDynamicDidChangeFocus(id: string) {
 		return this._getBrowserView(id).onDidChangeFocus;
 	}
@@ -309,8 +313,8 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
 		return this._getBrowserView(id).getSelectedText();
 	}
 
-	async setScrollTop(id: string, scrollTop: number): Promise<void> {
-		return this._getBrowserView(id).setScrollTop(scrollTop);
+	async captureDomSnapshot(id: string): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined> {
+		return this._getBrowserView(id).captureDomSnapshot();
 	}
 
 	async clearStorage(id: string): Promise<void> {

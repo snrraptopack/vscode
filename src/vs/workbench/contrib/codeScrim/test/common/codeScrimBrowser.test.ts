@@ -5,23 +5,16 @@
 
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { findCodeScrimBrowserState, findCodeScrimBrowserThumbnail, findCodeScrimVisiblePage, ICodeScrimBrowserTrack } from '../../common/codeScrimBrowser.js';
+import { findCodeScrimBrowserSnapshot, findCodeScrimVisiblePage, ICodeScrimBrowserTrack } from '../../common/codeScrimBrowser.js';
 
 suite('CodeScrimBrowser', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
 	const track: ICodeScrimBrowserTrack = {
-		events: [
-			{ timestamp: 100, kind: 'browser.navigated', payload: { pageId: 'one', url: 'http://one' } },
-			{ timestamp: 150, kind: 'browser.titleChanged', payload: { pageId: 'one', title: 'One' } },
-			{ timestamp: 200, kind: 'browser.scrolled', payload: { pageId: 'one', scrollTop: 320 } },
-			{ timestamp: 500, kind: 'browser.navigated', payload: { pageId: 'two', url: 'http://two' } },
-			{ timestamp: 550, kind: 'browser.zoomChanged', payload: { pageId: 'two', zoomFactor: 1.25 } },
-		],
-		thumbnails: [
-			{ timestamp: 100, pageId: 'one', url: 'http://one', title: 'One', mimeType: 'image/jpeg', data: 'one-a' },
-			{ timestamp: 300, pageId: 'one', url: 'http://one', title: 'One', mimeType: 'image/jpeg', data: 'one-b' },
-			{ timestamp: 500, pageId: 'two', url: 'http://two', title: 'Two', mimeType: 'image/jpeg', data: 'two-a' },
+		snapshots: [
+			{ timestamp: 100, pageId: 'one', url: 'http://one', title: 'One', scrollTop: 0, html: '<html>one-a</html>' },
+			{ timestamp: 300, pageId: 'one', url: 'http://one', title: 'One', scrollTop: 320, html: '<html>one-b</html>' },
+			{ timestamp: 500, pageId: 'two', url: 'http://two', title: 'Two', scrollTop: 0, html: '<html>two-a</html>' },
 		],
 		visibility: [
 			{ timestamp: 50, pageId: 'one', visible: true },
@@ -39,41 +32,27 @@ suite('CodeScrimBrowser', () => {
 		], [undefined, 'one', undefined, 'two']);
 	});
 
-	test('reconstructs recorded state of the visible page at a position', () => {
-		assert.deepStrictEqual(findCodeScrimBrowserState(track, 350), {
+	test('resolves the latest snapshot of the visible page at a position', () => {
+		assert.deepStrictEqual([
+			findCodeScrimBrowserSnapshot(track, 200)?.html,
+			findCodeScrimBrowserSnapshot(track, 350)?.html,
+			findCodeScrimBrowserSnapshot(track, 600)?.html,
+		], ['<html>one-a</html>', '<html>one-b</html>', '<html>two-a</html>']);
+		assert.deepStrictEqual(findCodeScrimBrowserSnapshot(track, 350), {
+			timestamp: 300,
 			pageId: 'one',
 			url: 'http://one',
 			title: 'One',
-			zoomFactor: undefined,
-			width: undefined,
-			height: undefined,
 			scrollTop: 320,
+			html: '<html>one-b</html>',
 		});
-		assert.deepStrictEqual(findCodeScrimBrowserState(track, 600), {
-			pageId: 'two',
-			url: 'http://two',
-			title: undefined,
-			zoomFactor: 1.25,
-			width: undefined,
-			height: undefined,
-			scrollTop: undefined,
-		});
-		assert.strictEqual(findCodeScrimBrowserState(track, 25), undefined);
+		assert.strictEqual(findCodeScrimBrowserSnapshot(track, 25), undefined);
 	});
 
-	test('resolves the scrubber thumbnail of the visible page at a position', () => {
-		assert.deepStrictEqual([
-			findCodeScrimBrowserThumbnail(track, 200)?.data,
-			findCodeScrimBrowserThumbnail(track, 350)?.data,
-			findCodeScrimBrowserThumbnail(track, 600)?.data,
-		], ['one-a', 'one-b', 'two-a']);
-	});
-
-	test('falls back to the most recent thumbnail when the visible page has none yet', () => {
+	test('falls back to the most recent snapshot when the visible page has none yet', () => {
 		const partial: ICodeScrimBrowserTrack = {
-			events: [{ timestamp: 100, kind: 'browser.navigated', payload: { pageId: 'one', url: 'http://one' } }],
-			thumbnails: [
-				{ timestamp: 100, pageId: 'one', url: 'http://one', title: 'One', mimeType: 'image/jpeg', data: 'one-a' },
+			snapshots: [
+				{ timestamp: 100, pageId: 'one', url: 'http://one', title: 'One', scrollTop: 0, html: '<html>one-a</html>' },
 			],
 			visibility: [
 				{ timestamp: 50, pageId: 'one', visible: true },
@@ -82,7 +61,7 @@ suite('CodeScrimBrowser', () => {
 			],
 		};
 
-		assert.strictEqual(findCodeScrimBrowserThumbnail(partial, 430)?.data, 'one-a');
+		assert.strictEqual(findCodeScrimBrowserSnapshot(partial, 430)?.html, '<html>one-a</html>');
 		assert.strictEqual(findCodeScrimVisiblePage(partial, 25), undefined);
 	});
 });

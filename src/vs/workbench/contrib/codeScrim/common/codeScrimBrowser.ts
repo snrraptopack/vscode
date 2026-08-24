@@ -5,32 +5,24 @@
 
 export const CODE_SCRIM_OPEN_AUTHOR_BROWSER_COMMAND_ID = 'codescrim.openAuthorBrowser';
 export const CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID = 'codescrim.openLearnerBrowser';
-export const CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID = 'codescrim.openReplayBrowser';
 export const CODE_SCRIM_TOGGLE_LESSON_BROWSER_COMMAND_ID = 'codescrim.toggleLessonBrowser';
 
 /**
- * A semantic instructor browser event on the CodeScrim session clock.
+ * A serialized DOM state of the instructor browser page on the session clock.
  *
- * Browser replay is state reconstruction, not video: recorded events re-drive a real,
- * read-only Integrated Browser at replay time. No event ever carries executable page
- * content, and decoding a track never loads a URL outside explicit replay navigation.
+ * The snapshot is a passive document: scripts and event-handler attributes are
+ * stripped before it leaves the page, so replay rebuilds the recorded page
+ * offline without ever executing recorded content.
  */
-export type CodeScrimBrowserEventData =
-	| { readonly kind: 'browser.navigated'; readonly payload: { readonly pageId: string; readonly url: string } }
-	| { readonly kind: 'browser.titleChanged'; readonly payload: { readonly pageId: string; readonly title: string } }
-	| { readonly kind: 'browser.zoomChanged'; readonly payload: { readonly pageId: string; readonly zoomFactor: number } }
-	| { readonly kind: 'browser.deviceChanged'; readonly payload: { readonly pageId: string; readonly width?: number; readonly height?: number } }
-	| { readonly kind: 'browser.scrolled'; readonly payload: { readonly pageId: string; readonly scrollTop: number } }
-	| { readonly kind: 'browser.pageClosed'; readonly payload: { readonly pageId: string } };
-
-/** A sparse visual anchor used for timeline scrubber previews only. */
-export interface ICodeScrimBrowserThumbnail {
+export interface ICodeScrimBrowserSnapshot {
 	readonly timestamp: number;
 	readonly pageId: string;
 	readonly url: string;
 	readonly title: string;
-	readonly mimeType: 'image/jpeg';
-	readonly data: string;
+	/** Vertical scroll offset in CSS pixels when the snapshot was taken. */
+	readonly scrollTop: number;
+	/** Serialized document, scripts removed. Rendered in a sandboxed iframe at replay. */
+	readonly html: string;
 }
 
 /** Records whether an instructor browser page occupied the teaching surface. */
@@ -41,12 +33,12 @@ export interface ICodeScrimBrowserVisibility {
 }
 
 /**
- * Passive browser recording. Events reconstruct state in a live replay browser;
- * thumbnails are presentation metadata for the timeline, never the lesson surface.
+ * Passive browser recording. Snapshots reconstruct the recorded DOM in the
+ * lesson surface; the learner interacts with the same surface, so instructor
+ * playback and learner interaction are both DOM state on one element.
  */
 export interface ICodeScrimBrowserTrack {
-	readonly events: readonly (CodeScrimBrowserEventData & { readonly timestamp: number })[];
-	readonly thumbnails: readonly ICodeScrimBrowserThumbnail[];
+	readonly snapshots: readonly ICodeScrimBrowserSnapshot[];
 	readonly visibility: readonly ICodeScrimBrowserVisibility[];
 }
 
@@ -73,71 +65,22 @@ export function findCodeScrimVisiblePage(track: ICodeScrimBrowserTrack | undefin
 }
 
 /**
- * Reconstructs the recorded presentation state of the visible page at a position:
- * URL, title, zoom, device viewport, and last known scroll offset.
+ * Resolves the recorded DOM snapshot of the visible page at a position: the
+ * latest snapshot at or before the position, preferring the visible page and
+ * falling back to the most recent of any recorded page.
  */
-export interface ICodeScrimBrowserPageState {
-	readonly pageId: string;
-	readonly url?: string;
-	readonly title?: string;
-	readonly zoomFactor?: number;
-	readonly width?: number;
-	readonly height?: number;
-	readonly scrollTop?: number;
-}
-
-export function findCodeScrimBrowserState(track: ICodeScrimBrowserTrack | undefined, position: number): ICodeScrimBrowserPageState | undefined {
-	const pageId = findCodeScrimVisiblePage(track, position);
-	if (!pageId || !track) {
-		return undefined;
-	}
-	let url: string | undefined;
-	let title: string | undefined;
-	let zoomFactor: number | undefined;
-	let width: number | undefined;
-	let height: number | undefined;
-	let scrollTop: number | undefined;
-	for (const event of track.events) {
-		if (event.timestamp > position || event.payload.pageId !== pageId) {
-			continue;
-		}
-		switch (event.kind) {
-			case 'browser.navigated':
-				url = event.payload.url;
-				break;
-			case 'browser.titleChanged':
-				title = event.payload.title;
-				break;
-			case 'browser.zoomChanged':
-				zoomFactor = event.payload.zoomFactor;
-				break;
-			case 'browser.deviceChanged':
-				width = event.payload.width;
-				height = event.payload.height;
-				break;
-			case 'browser.scrolled':
-				scrollTop = event.payload.scrollTop;
-				break;
-		}
-	}
-	return { pageId, url, title, zoomFactor, width, height, scrollTop };
-}
-
-/** Resolves the scrubber thumbnail shown at a timeline position, if any. */
-export function findCodeScrimBrowserThumbnail(track: ICodeScrimBrowserTrack | undefined, position: number): ICodeScrimBrowserThumbnail | undefined {
+export function findCodeScrimBrowserSnapshot(track: ICodeScrimBrowserTrack | undefined, position: number): ICodeScrimBrowserSnapshot | undefined {
 	if (!track) {
 		return undefined;
 	}
 	const pageId = findCodeScrimVisiblePage(track, position);
-	const index = findLastTimestamp(track.thumbnails, position);
-	// Prefer the visible page's latest thumbnail; fall back to the most recent of any
-	// recorded page so a just-became-visible page still shows the closest known state.
-	let fallback: ICodeScrimBrowserThumbnail | undefined;
+	const index = findLastTimestamp(track.snapshots, position);
+	let fallback: ICodeScrimBrowserSnapshot | undefined;
 	for (let candidate = index; candidate >= 0; candidate--) {
-		const thumbnail = track.thumbnails[candidate];
-		fallback ??= thumbnail;
-		if (!pageId || thumbnail.pageId === pageId) {
-			return thumbnail;
+		const snapshot = track.snapshots[candidate];
+		fallback ??= snapshot;
+		if (!pageId || snapshot.pageId === pageId) {
+			return snapshot;
 		}
 	}
 	return fallback;

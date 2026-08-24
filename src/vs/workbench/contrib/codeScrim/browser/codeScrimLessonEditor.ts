@@ -23,7 +23,6 @@ import { ITextModel } from '../../../../editor/common/model.js';
 import { getIconClasses } from '../../../../editor/common/services/getIconClasses.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { localize } from '../../../../nls.js';
-import { ILogService } from '../../../../platform/log/common/log.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { IEditorOptions } from '../../../../platform/editor/common/editor.js';
@@ -36,12 +35,12 @@ import { IThemeService } from '../../../../platform/theme/common/themeService.js
 import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { IEditorOpenContext } from '../../../common/editor.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
-import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
-import { CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID, ICodeScrimBrowserPageState, ICodeScrimBrowserThumbnail } from '../common/codeScrimBrowser.js';
+import { CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, ICodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
 import { CodeScrimLessonEditorInput } from './codeScrimLessonEditorInput.js';
+import { applyCodeScrimBrowserReplayDom } from './codeScrimBrowserReplayDom.js';
 import { CodeScrimLearnerFilesTree } from './codeScrimLearnerFilesTree.js';
 import { CodeScrimTerminalSurface } from './codeScrimTerminalSurface.js';
 import { CodeScrimTerminalTimeline } from './codeScrimTerminalTimeline.js';
@@ -78,10 +77,11 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private browserPreview: HTMLElement | undefined;
 	private browserTitle: HTMLElement | undefined;
 	private browserUrl: HTMLElement | undefined;
-	private browserThumbnail: HTMLImageElement | undefined;
-	private browserThumbnailEmpty: HTMLElement | undefined;
-	private browserState: ICodeScrimBrowserPageState | undefined;
-	private browserThumbnailData: ICodeScrimBrowserThumbnail | undefined;
+	private browserFrameHost: HTMLElement | undefined;
+	private browserFrame: HTMLIFrameElement | undefined;
+	private browserSnapshot: ICodeScrimBrowserSnapshot | undefined;
+	private renderedBrowserSnapshot: ICodeScrimBrowserSnapshot | undefined;
+	private browserRenderFrame: number | undefined;
 	private browserPreviewSuppressed = false;
 	private navigationRevealButton: HTMLButtonElement | undefined;
 	private contextRevealButton: HTMLButtonElement | undefined;
@@ -107,6 +107,8 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private timelineScrubbing = false;
 	private resumeAfterTimelineScrub = false;
 	private timelinePause: Promise<void> | undefined;
+	private timelinePreviewPosition: number | undefined;
+	private timelinePreviewFrame: number | undefined;
 	private selectedExperimentId: string | undefined;
 	private reviewingExperimentId: string | undefined;
 
@@ -119,7 +121,6 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ILanguageService private readonly languageService: ILanguageService,
-		@ILogService private readonly logService: ILogService,
 		@ICodeScrimLayoutService private readonly layoutService: ICodeScrimLayoutService,
 		@IModelService private readonly modelService: IModelService,
 		@ICodeScrimReplayService private readonly replayService: ICodeScrimReplayService,
@@ -139,6 +140,16 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			this.renderLearnerExperimentMarkers();
 			this.renderExperimentPopover();
 		}));
+		this._register({ dispose: () => {
+			if (this.browserRenderFrame !== undefined) {
+				mainWindow.cancelAnimationFrame(this.browserRenderFrame);
+				this.browserRenderFrame = undefined;
+			}
+			if (this.timelinePreviewFrame !== undefined) {
+				mainWindow.cancelAnimationFrame(this.timelinePreviewFrame);
+				this.timelinePreviewFrame = undefined;
+			}
+		} });
 	}
 
 	protected override createEditor(parent: HTMLElement): void {
@@ -203,12 +214,12 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	}
 
 	async toggleBrowserPanel(): Promise<void> {
-		if (!this.browserState) {
+		if (!this.browserSnapshot) {
 			await this.commandService.executeCommand(CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID);
 			return;
 		}
 		this.browserPreviewSuppressed = !this.browserPreviewSuppressed;
-		this.renderBrowserState();
+		this.renderBrowserSnapshot();
 	}
 
 	openResource(resource: ICodeScrimWorkspaceResource, model: ITextModel): void {
@@ -250,18 +261,50 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.codeEditor.setScrollPosition(position, ScrollType.Immediate);
 	}
 
-	showBrowserState(state: ICodeScrimBrowserPageState | undefined, thumbnail?: ICodeScrimBrowserThumbnail): void {
-		if (!state) {
-			this.browserPreviewSuppressed = false;
+	previewResource(resource: ICodeScrimWorkspaceResource, model: ITextModel, selections?: readonly ICodeScrimSelection[], scrollPosition?: ICodeScrimScrollPosition): void {
+		const key = CodeScrimRecordingBuffer.resourceKey(resource);
+		const added = !this.openedResources.some(candidate => CodeScrimRecordingBuffer.resourceKey(candidate) === key);
+		if (added) {
+			this.openedResources.push(resource);
 		}
-		this.browserState = state;
-		this.browserThumbnailData = thumbnail;
-		this.renderBrowserState();
+		const changedModel = this.codeEditor?.getModel() !== model;
+		if (changedModel) {
+			this.codeEditor?.setModel(model);
+		}
+		this.root?.classList.add('has-replay-model');
+		if (added || changedModel) {
+			this.renderReplayTabs(resource);
+		}
+		if (selections?.length) {
+			this.codeEditor?.setSelections(selections.map(selection => new Selection(
+				selection.selectionStartLineNumber,
+				selection.selectionStartColumn,
+				selection.positionLineNumber,
+				selection.positionColumn,
+			)));
+		}
+		if (scrollPosition) {
+			this.codeEditor?.setScrollPosition(scrollPosition, ScrollType.Immediate);
+		}
 	}
 
-	clear(): void {
+	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined): void {
+		if (!snapshot) {
+			this.browserPreviewSuppressed = false;
+		}
+		if (this.browserSnapshot === snapshot) {
+			return;
+		}
+		this.browserSnapshot = snapshot;
+		this.scheduleBrowserSnapshotRender();
+	}
+
+	clear(preserveBrowser = false): void {
 		this.dismissExperimentPopover();
-		this.showBrowserState(undefined);
+		if (!preserveBrowser) {
+			this.showBrowserSnapshot(undefined);
+			this.renderedBrowserSnapshot = undefined;
+		}
 		this.codeEditor?.setModel(null);
 		this.openedResources.length = 0;
 		this.root?.classList.remove('has-replay-model');
@@ -448,25 +491,6 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.browserUrl = DOM.append(metadata, DOM.$('span'));
 		DOM.append(toolbar, DOM.$('.codescrim-session-browser-mode', undefined, localize('codeScrim.lessonBrowserMode', "Lesson Preview")));
 
-		// The recorded page is restored in a real, read-only Integrated Browser opened
-		// beside the lesson. The preview surface shows the recorded thumbnail and hands
-		// the learner to the live browser for interaction.
-		const replayButton = DOM.append(toolbar, DOM.$('button.codescrim-session-browser-action', {
-			type: 'button',
-			title: localize('codeScrim.openReplayBrowser', "Open Replay Browser"),
-		}, localize('codeScrim.openReplayBrowserLabel', "Open Replay Browser"))) as HTMLButtonElement;
-		this._register(DOM.addDisposableListener(replayButton, DOM.EventType.CLICK, () => {
-			void this.openReplayBrowser();
-		}));
-
-		const liveButton = DOM.append(toolbar, DOM.$('button.codescrim-session-browser-action', {
-			type: 'button',
-			title: localize('codeScrim.openLearnerBrowser', "Open My Preview"),
-		}, localize('codeScrim.myBrowserPreview', "My Preview"))) as HTMLButtonElement;
-		this._register(DOM.addDisposableListener(liveButton, DOM.EventType.CLICK, () => {
-			void this.commandService.executeCommand(CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID);
-		}));
-
 		const closeButton = DOM.append(toolbar, DOM.$('button.codescrim-session-browser-close', {
 			type: 'button',
 			title: localize('codeScrim.hideRecordedBrowser', "Hide Recorded Browser"),
@@ -475,70 +499,97 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		closeButton.appendChild(renderIcon(Codicon.close));
 		this._register(DOM.addDisposableListener(closeButton, DOM.EventType.CLICK, () => {
 			this.browserPreviewSuppressed = true;
-			this.renderBrowserState();
+			this.renderBrowserSnapshot();
 		}));
 
-		const viewport = DOM.append(preview, DOM.$('.codescrim-session-browser-viewport'));
-		this.browserThumbnail = DOM.append(viewport, DOM.$('img', {
-			alt: localize('codeScrim.recordedBrowserThumbnail', "Recorded instructor browser preview"),
-		})) as HTMLImageElement;
-		this.browserThumbnailEmpty = DOM.append(viewport, DOM.$('.codescrim-session-browser-thumbnail-empty', undefined,
-			localize('codeScrim.replayBrowserHint', "Open the Replay Browser to restore this recorded page live.")));
-		this.browserThumbnailEmpty.hidden = true;
+		// The replay surface is the recorded DOM itself, rendered in a sandboxed
+		// iframe: real elements, real text, selectable, fully offline. Scripts and
+		// event handlers were stripped at capture, so nothing recorded can execute.
+		this.browserFrameHost = DOM.append(preview, DOM.$('.codescrim-session-browser-frame-host'));
+		this.browserFrame = DOM.append(this.browserFrameHost, DOM.$('iframe.codescrim-session-browser-frame', {
+			// Scripts, forms, popups, and navigation remain disabled. Same-origin access is
+			// retained only so the owning lesson surface can restore recorded scroll state.
+			sandbox: 'allow-same-origin',
+			title: localize('codeScrim.recordedBrowserFrameTitle', "Recorded instructor page"),
+		})) as HTMLIFrameElement;
+		this._register(DOM.addDisposableListener(this.browserFrame, DOM.EventType.LOAD, () => {
+			// A real navigation is never part of passive replay. Re-apply the current
+			// instructor state if an older package or browser action leaves srcdoc.
+			this.renderedBrowserSnapshot = undefined;
+			this.renderBrowserSnapshot();
+			this.restoreBrowserSnapshotScroll();
+		}));
 	}
 
-	private renderBrowserState(): void {
-		if (!this.browserPreview || !this.browserThumbnail || !this.browserThumbnailEmpty) {
+	private scheduleBrowserSnapshotRender(): void {
+		if (this.browserRenderFrame !== undefined) {
 			return;
 		}
-		const state = this.browserState;
-		const visible = !!state && !this.browserPreviewSuppressed;
+		this.browserRenderFrame = mainWindow.requestAnimationFrame(() => {
+			this.browserRenderFrame = undefined;
+			this.renderBrowserSnapshot();
+		});
+	}
+
+	private renderBrowserSnapshot(): void {
+		if (!this.browserPreview || !this.browserFrame || !this.browserFrameHost) {
+			return;
+		}
+		const snapshot = this.browserSnapshot;
+		const visible = !!snapshot && !this.browserPreviewSuppressed;
 		this.browserPreview.hidden = !visible;
-		if (!visible || !state) {
+		if (!visible || !snapshot) {
 			return;
 		}
 		this.renderBrowserMetadata();
-		const thumbnail = this.browserThumbnailData;
-		if (thumbnail) {
-			this.browserThumbnail.src = `data:${thumbnail.mimeType};base64,${thumbnail.data}`;
-			this.browserThumbnail.style.display = 'block';
-			this.browserThumbnailEmpty.hidden = true;
-		} else {
-			this.browserThumbnail.removeAttribute('src');
-			this.browserThumbnail.style.display = 'none';
-			this.browserThumbnailEmpty.hidden = false;
+		// Reconcile into the existing document so every browser state does not reload
+		// the iframe and flash white during ordinary interaction playback.
+		if (this.renderedBrowserSnapshot !== snapshot) {
+			this.renderedBrowserSnapshot = snapshot;
+			if (applyCodeScrimBrowserReplayDom(this.browserFrame, snapshot.html)) {
+				this.restoreBrowserSnapshotScroll();
+			}
 		}
+	}
+
+	private restoreBrowserSnapshotScroll(): void {
+		const frame = this.browserFrame;
+		const snapshot = this.browserSnapshot;
+		if (!frame || !snapshot) {
+			return;
+		}
+		mainWindow.requestAnimationFrame(() => {
+			try {
+				frame.contentWindow?.scrollTo(0, snapshot.scrollTop);
+				const document = frame.contentDocument;
+				const walker = document?.createTreeWalker(document, mainWindow.NodeFilter.SHOW_ELEMENT);
+				for (let node = walker?.nextNode(); node; node = walker?.nextNode()) {
+					const element = node as Element;
+					const scrollTop = element.getAttribute('data-vscode-codescrim-scroll-top');
+					const scrollLeft = element.getAttribute('data-vscode-codescrim-scroll-left');
+					const scrollable = element as HTMLElement;
+					if ((scrollTop === null && scrollLeft === null) || typeof scrollable.scrollTo !== 'function') {
+						continue;
+					}
+					scrollable.scrollTo({
+						top: Number(scrollTop) || 0,
+						left: Number(scrollLeft) || 0,
+						behavior: 'instant',
+					});
+				}
+			} catch {
+				// A malformed or externally supplied snapshot must not fail the replay clock.
+			}
+		});
 	}
 
 	private renderBrowserMetadata(): void {
-		const state = this.browserState;
+		const snapshot = this.browserSnapshot;
 		if (this.browserTitle) {
-			this.browserTitle.textContent = state?.title || localize('codeScrim.untitledBrowserPage', "Browser");
+			this.browserTitle.textContent = snapshot?.title || localize('codeScrim.untitledBrowserPage', "Browser");
 		}
 		if (this.browserUrl) {
-			this.browserUrl.textContent = state?.url ?? '';
-		}
-	}
-
-	/** Opens the dedicated replay browser beside the lesson and restores the current recorded page state in it. */
-	private async openReplayBrowser(): Promise<void> {
-		const state = this.browserState;
-		try {
-			const input = await this.commandService.executeCommand(CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID) as BrowserEditorInput | undefined;
-			if (!input || !state?.url) {
-				return;
-			}
-			const model = await input.resolve();
-			if (model.url !== state.url) {
-				await model.loadURL(state.url);
-			}
-			if (state.scrollTop !== undefined) {
-				await model.setScrollTop(state.scrollTop);
-			}
-		} catch (error) {
-			// The recorded page may no longer be reachable at replay time. The replay
-			// browser stays honest about that instead of pretending the state was restored.
-			this.logService.warn('[CodeScrim] Replay browser could not restore the recorded page state.', error);
+			this.browserUrl.textContent = snapshot?.url ?? '';
 		}
 	}
 
@@ -615,6 +666,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			const replayState = this.replayService.state;
 			if (replayState.status !== 'idle') {
 				this.beginTimelineScrub();
+				this.scheduleTimelinePreview(position);
 				if (this.time) {
 					this.time.textContent = localize('codeScrim.lessonTime', "{0} / {1}", this.formatTime(position / 1000), this.formatTime(replayState.duration / 1000));
 				}
@@ -820,11 +872,36 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 
 		this.timelineScrubbing = true;
 		this.resumeAfterTimelineScrub = this.replayService.state.status === 'playing';
-		this.timelinePause = this.resumeAfterTimelineScrub ? this.replayService.pause() : Promise.resolve();
+		this.timelinePause = (this.resumeAfterTimelineScrub ? this.replayService.pause() : Promise.resolve()).then(() => {
+			if (this.timelineScrubbing) {
+				this.replayService.preview(Number(this.progress?.value ?? this.replayService.state.position));
+			}
+		});
+	}
+
+	private scheduleTimelinePreview(position: number): void {
+		this.timelinePreviewPosition = position;
+		if (this.timelinePreviewFrame !== undefined) {
+			return;
+		}
+		this.timelinePreviewFrame = mainWindow.requestAnimationFrame(() => {
+			this.timelinePreviewFrame = undefined;
+			const previewPosition = this.timelinePreviewPosition;
+			this.timelinePreviewPosition = undefined;
+			if (previewPosition !== undefined) {
+				this.replayService.preview(previewPosition);
+			}
+		});
 	}
 
 	private async commitTimelineScrub(position: number): Promise<void> {
 		this.beginTimelineScrub();
+		if (this.timelinePreviewFrame !== undefined) {
+			mainWindow.cancelAnimationFrame(this.timelinePreviewFrame);
+			this.timelinePreviewFrame = undefined;
+		}
+		this.timelinePreviewPosition = undefined;
+		this.replayService.preview(position);
 		const resume = this.resumeAfterTimelineScrub;
 		try {
 			await this.timelinePause;

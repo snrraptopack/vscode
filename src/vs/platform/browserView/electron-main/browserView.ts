@@ -81,6 +81,9 @@ export class BrowserView extends Disposable {
 	private readonly _onDidChangeLoadingState = this._register(new Emitter<IBrowserViewLoadingEvent>());
 	readonly onDidChangeLoadingState: Event<IBrowserViewLoadingEvent> = this._onDidChangeLoadingState.event;
 
+	private readonly _onDidChangeContent = this._register(new Emitter<void>());
+	readonly onDidChangeContent: Event<void> = this._onDidChangeContent.event;
+
 	private readonly _onDidChangeFocus = this._register(new Emitter<IBrowserViewFocusEvent>());
 	readonly onDidChangeFocus: Event<IBrowserViewFocusEvent> = this._onDidChangeFocus.event;
 
@@ -462,6 +465,13 @@ export class BrowserView extends Disposable {
 
 		// Forward key down events that weren't handled by the page to the workbench for shortcut handling.
 		webContents.ipc.on('vscode:browserView:keydown', onCommandKeydown);
+		const onContentChanged = (event: Electron.IpcMainEvent) => {
+			if (event.senderFrame === webContents.mainFrame) {
+				this._onDidChangeContent.fire();
+			}
+		};
+		webContents.ipc.on('vscode:browserView:contentChanged', onContentChanged);
+		this._register({ dispose: () => webContents.ipc.removeListener('vscode:browserView:contentChanged', onContentChanged) });
 		webContents.on('devtools-opened', () => {
 			// Avoid double-registration if the webContents is reused.
 			webContents.devToolsWebContents?.ipc.off('vscode:browserView:keydown', onCommandKeydown);
@@ -734,6 +744,23 @@ export class BrowserView extends Disposable {
 	}
 
 	/**
+	 * Serialize the current DOM state of the page for passive replay.
+	 * Runs through the preloaded isolated-world API; returns undefined when the
+	 * page is loading or the frame is gone.
+	 */
+	async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined> {
+		if (this._view.webContents.isLoading() || this._view.webContents.isDestroyed()) {
+			return undefined;
+		}
+		try {
+			const result = await this._view.webContents.executeJavaScriptInIsolatedWorld(browserViewIsolatedWorldId, [{ code: 'window.browserViewAPI?.captureDomSnapshot?.()' }]);
+			return result && typeof result.html === 'string' ? result : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/**
 	 * Load a URL in this view
 	 */
 	async loadURL(url: string): Promise<void> {
@@ -991,24 +1018,6 @@ export class BrowserView extends Disposable {
 		}
 	}
 
-	/**
-	 * Scroll the page to an absolute vertical offset in CSS pixels.
-	 * Uses the preloaded isolated-world API so page scripts cannot observe or spoof it.
-	 */
-	async setScrollTop(scrollTop: number): Promise<void> {
-		if (!Number.isFinite(scrollTop) || scrollTop < 0) {
-			return;
-		}
-		try {
-			await this._view.webContents.executeJavaScriptInIsolatedWorld(browserViewIsolatedWorldId, [{ code: `window.browserViewAPI?.setScrollTop?.(${Math.round(scrollTop)})` }]);
-		} catch (error) {
-			this.logService.warn('Failed to scroll browser view webContents.', error);
-		}
-	}
-
-	/**
-	 * Clear all storage data for this browser view's session
-	 */
 	async clearStorage(): Promise<void> {
 		await this.session.clearData();
 	}

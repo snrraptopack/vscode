@@ -34,6 +34,31 @@ let localizedStrings: IBrowserViewPreloadLocalizedStrings = {
 function init() {
 	const { contextBridge, ipcRenderer } = require('electron');
 
+	// CodeScrim consumes this as a dirty signal and performs the expensive DOM
+	// serialization outside the page. Coalescing here keeps mutation-heavy apps
+	// from flooding the main-process event bridge.
+	let contentChangePending = false;
+	const reportContentChange = () => {
+		if (contentChangePending) {
+			return;
+		}
+		contentChangePending = true;
+		setTimeout(() => {
+			contentChangePending = false;
+			ipcRenderer.send('vscode:browserView:contentChanged');
+		}, 100);
+	};
+	const contentObserver = new MutationObserver(reportContentChange);
+	contentObserver.observe(document, {
+		attributes: true,
+		characterData: true,
+		childList: true,
+		subtree: true,
+	});
+	document.addEventListener('input', reportContentChange, true);
+	document.addEventListener('change', reportContentChange, true);
+	window.addEventListener('scroll', reportContentChange, true);
+
 	// #######################################################################
 	// ###                                                                 ###
 	// ###       !!! DO NOT USE GET/SET PROPERTIES ANYWHERE HERE !!!       ###
@@ -250,18 +275,66 @@ function init() {
 		},
 
 		/**
-		 * Scroll the page to an absolute vertical offset in CSS pixels.
+		 * Serialize the current DOM state of the main frame for passive replay.
+		 * Returns a self-contained HTML document string plus layout metadata.
+		 * Runs in the isolated world, so page scripts cannot tamper with the
+		 * serialization functions themselves.
 		 */
-		setScrollTop(scrollTop: number): void {
+		captureDomSnapshot(): { html: string; scrollY: number; title: string; url: string } | undefined {
 			try {
-				window.scrollTo({ top: scrollTop, behavior: 'instant' });
+				const clone = document.documentElement.cloneNode(true) as HTMLElement;
+				const sourceElements = document.documentElement.querySelectorAll('*');
+				const replayElements = clone.querySelectorAll('*');
+				// Replay is passive: strip scripts and event-bearing attributes so the
+				// reconstructed document can never execute recorded page content.
+				clone.querySelectorAll('script').forEach(script => script.remove());
+				replayElements.forEach((element, index) => {
+					for (const attribute of [...element.attributes]) {
+						if (attribute.name.toLowerCase().startsWith('on')) {
+							element.removeAttribute(attribute.name);
+						}
+					}
+					const source = sourceElements[index];
+					if (source instanceof HTMLInputElement && element instanceof HTMLInputElement) {
+						element.setAttribute('value', source.value);
+						element.toggleAttribute('checked', source.checked);
+					} else if (source instanceof HTMLTextAreaElement && element instanceof HTMLTextAreaElement) {
+						element.textContent = source.value;
+					} else if (source instanceof HTMLSelectElement && element instanceof HTMLSelectElement) {
+						for (let optionIndex = 0; optionIndex < source.options.length; optionIndex++) {
+							element.options[optionIndex]?.toggleAttribute('selected', source.options[optionIndex].selected);
+						}
+					} else if (source instanceof HTMLDetailsElement && element instanceof HTMLDetailsElement) {
+						element.toggleAttribute('open', source.open);
+					}
+					if (source instanceof HTMLElement) {
+						if (source.scrollTop) {
+							element.setAttribute('data-vscode-codescrim-scroll-top', String(source.scrollTop));
+						}
+						if (source.scrollLeft) {
+							element.setAttribute('data-vscode-codescrim-scroll-left', String(source.scrollLeft));
+						}
+					}
+				});
+				const head = clone.querySelector('head');
+				if (head) {
+					const base = clone.ownerDocument.createElement('base');
+					base.setAttribute('href', document.baseURI);
+					head.prepend(base);
+				}
+				return {
+					html: '<!DOCTYPE html>' + clone.outerHTML,
+					scrollY: window.scrollY || 0,
+					title: document.title,
+					url: location.href,
+				};
 			} catch {
-				// A page can make scrolling fail (e.g. custom scroll hijacking); ignore.
+				return undefined;
 			}
 		}
 	};
 
-	// Generate a unique token for this frame instance. This token is used to
+		// Generate a unique token for this frame instance. This token is used to
 	// correlate the Electron WebFrameMain (available via IPC senderFrame) with
 	// the CDP target session (discoverable via Runtime.evaluate in the main world).
 	const frameToken = `frame-${Date.now()}-${Math.random().toString(36).slice(2)}`;

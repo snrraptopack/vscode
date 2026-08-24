@@ -25,7 +25,7 @@ import { IEditorService, SIDE_GROUP } from '../../../services/editor/common/edit
 import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
 import { IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
 import { TerminalContextKeys } from '../../terminal/common/terminalContextKey.js';
-import { CODE_SCRIM_OPEN_AUTHOR_BROWSER_COMMAND_ID, CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID, CODE_SCRIM_TOGGLE_LESSON_BROWSER_COMMAND_ID } from '../common/codeScrimBrowser.js';
+import { CODE_SCRIM_OPEN_AUTHOR_BROWSER_COMMAND_ID, CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, CODE_SCRIM_TOGGLE_LESSON_BROWSER_COMMAND_ID } from '../common/codeScrimBrowser.js';
 import { CODE_SCRIM_OPEN_RECORDING_COMMAND_ID, CODE_SCRIM_PACKAGE_EXTENSION, CODE_SCRIM_SAVE_RECORDING_COMMAND_ID, ICodeScrimPackageService } from '../common/codeScrimPackage.js';
 import { CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft } from '../common/codeScrimRecording.js';
 import { CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID, CODE_SCRIM_RESTART_REPLAY_COMMAND_ID, CODE_SCRIM_RESUME_REPLAY_COMMAND_ID, CODE_SCRIM_STOP_REPLAY_COMMAND_ID, ICodeScrimReplayService } from '../common/codeScrimReplay.js';
@@ -221,29 +221,6 @@ registerAction2(class extends Action2 {
 
 	run(accessor: ServicesAccessor): Promise<void> {
 		return openCodeScrimBrowser(accessor, 'codescrim-learner-browser', localize('codeScrim.learnerBrowserTitle', "My Preview"));
-	}
-});
-
-registerAction2(class extends Action2 {
-	constructor() {
-		super({
-			id: CODE_SCRIM_OPEN_REPLAY_BROWSER_COMMAND_ID,
-			title: localize2('codeScrim.openReplayBrowser', "Open Lesson Replay Browser"),
-			category: localize2('codeScrim.category', "CodeScrim"),
-			f1: false,
-		});
-	}
-
-	/** Opens (or reveals) the dedicated read-only replay browser beside the lesson and returns its input. */
-	async run(accessor: ServicesAccessor): Promise<BrowserEditorInput | undefined> {
-		const browserViewService = accessor.get(IBrowserViewWorkbenchService);
-		const editorService = accessor.get(IEditorService);
-		const input = browserViewService.getOrCreateLazy('codescrim-replay-browser', {
-			url: 'about:blank',
-			title: localize('codeScrim.replayBrowserTitle', "Replay Browser"),
-		});
-		await editorService.openEditor(input, { pinned: true }, SIDE_GROUP);
-		return input;
 	}
 });
 

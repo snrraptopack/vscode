@@ -385,6 +385,7 @@ export interface IBrowserViewModel extends IDisposable {
 	readonly onWillNavigate: Event<string>;
 	readonly onDidNavigate: Event<IBrowserViewNavigationEvent>;
 	readonly onDidChangeLoadingState: Event<IBrowserViewLoadingEvent>;
+	readonly onDidChangeContent: Event<void>;
 	readonly onDidChangeFocus: Event<IBrowserViewFocusEvent>;
 	readonly onDidChangeDevToolsState: Event<IBrowserViewDevToolsStateEvent>;
 	readonly onDidKeyCommand: Event<IBrowserViewKeyDownEvent>;
@@ -415,8 +416,11 @@ export interface IBrowserViewModel extends IDisposable {
 	findInPage(text: string, options?: IBrowserViewFindInPageOptions): Promise<void>;
 	stopFindInPage(keepSelection?: boolean): Promise<void>;
 	getSelectedText(): Promise<string>;
-	/** Scroll the page to an absolute vertical offset in CSS pixels. */
-	setScrollTop(scrollTop: number): Promise<void>;
+	/**
+	 * Serialize the current DOM state of the page for passive replay.
+	 * Returns undefined when the page is loading or the frame is gone.
+	 */
+	captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined>;
 	clearStorage(): Promise<void>;
 	setSharedWithAgent(shared: boolean): Promise<boolean>;
 	trustCertificate(host: string, fingerprint: string): Promise<void>;
@@ -666,6 +670,10 @@ export class BrowserViewModel extends Disposable implements IBrowserViewModel {
 		return this.browserViewService.onDynamicDidChangeLoadingState(this.id);
 	}
 
+	get onDidChangeContent(): Event<void> {
+		return this.browserViewService.onDynamicDidChangeContent(this.id);
+	}
+
 	get onDidChangeFocus(): Event<IBrowserViewFocusEvent> {
 		return this.browserViewService.onDynamicDidChangeFocus(this.id);
 	}
@@ -774,8 +782,8 @@ export class BrowserViewModel extends Disposable implements IBrowserViewModel {
 		return this.browserViewService.getSelectedText(this.id);
 	}
 
-	async setScrollTop(scrollTop: number): Promise<void> {
-		return this.browserViewService.setScrollTop(this.id, scrollTop);
+	async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined> {
+		return this.browserViewService.captureDomSnapshot(this.id);
 	}
 
 	async clearStorage(): Promise<void> {

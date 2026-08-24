@@ -19,11 +19,12 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
-import { findCodeScrimBrowserState, findCodeScrimBrowserThumbnail } from '../common/codeScrimBrowser.js';
+import { findCodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
 import { CodeScrimNarrationPlayback } from './codeScrimNarrationPlayback.js';
+import { CodeScrimReplayPreview } from './codeScrimReplayPreview.js';
 import { CodeScrimTerminalReplay } from './codeScrimTerminalReplay.js';
 
 const REPLAY_TICK_INTERVAL = 16;
@@ -34,6 +35,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 
 	private readonly cursor = new CodeScrimReplayCursor();
 	private readonly terminalReplay = this._register(new CodeScrimTerminalReplay());
+	private readonly previewReplay: CodeScrimReplayPreview;
 	private readonly narrationPlayback: CodeScrimNarrationPlayback;
 	private readonly learnerOverlays = new CodeScrimLearnerOverlayStore();
 	private readonly operations = new Sequencer();
@@ -112,6 +114,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	) {
 		super();
 		this.narrationPlayback = this._register(new CodeScrimNarrationPlayback(logService));
+		this.previewReplay = this._register(new CodeScrimReplayPreview(modelService, languageService));
 	}
 
 	async replay(draft: ICodeScrimRecordingDraft): Promise<boolean> {
@@ -124,6 +127,13 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		const operation = ++this.operationVersion;
 		this.timer.clear();
 		return this.operations.queue(() => this.doRestart(operation));
+	}
+
+	preview(position: number): void {
+		if (!this.activeDraft || this._state.status === 'idle' || this._state.status === 'preparing') {
+			return;
+		}
+		this.previewReplay.show(this.activeDraft, position, this.surface, this.terminalReplay);
 	}
 
 	async seek(position: number): Promise<void> {
@@ -169,6 +179,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.activeDraft = undefined;
 			await this.closeReplayEditors();
 			this.surface?.clear();
+			this.previewReplay.clear();
 			this.models.clearAndDisposeAll();
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
@@ -394,10 +405,9 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		if (activeResource && activeModel) {
 			surface.openResource(activeResource, activeModel);
 		}
-		surface.showBrowserState(this.activeDraft && this._state.status !== 'idle'
-			? findCodeScrimBrowserState(this.activeDraft.browser, this._state.position)
-			: undefined,
-			findCodeScrimBrowserThumbnail(this.activeDraft?.browser, this._state.status === 'idle' ? 0 : this._state.position));
+		surface.showBrowserSnapshot(this.activeDraft && this._state.status !== 'idle'
+			? findCodeScrimBrowserSnapshot(this.activeDraft.browser, this._state.position)
+			: undefined);
 		return toDisposable(() => {
 			if (this.surface === surface) {
 				this.surface = undefined;
@@ -424,6 +434,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				return false;
 			}
 			this.surface?.clear();
+			this.previewReplay.clear();
 			this.models.clearAndDisposeAll();
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
@@ -456,6 +467,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				return false;
 			}
 			this.surface?.clear();
+			this.previewReplay.clear();
 			this.models.clearAndDisposeAll();
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
@@ -485,7 +497,10 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			if (!this.isCurrentOperation(operation)) {
 				return;
 			}
-			this.surface?.clear();
+			// Keep the inexpensive browser preview visible while the file/editor
+			// projection is rebuilt at the committed timeline position.
+			this.surface?.clear(true);
+			this.previewReplay.clear();
 			this.models.clearAndDisposeAll();
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
@@ -551,6 +566,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 				return;
 			}
 			this.surface?.clear();
+			this.previewReplay.clear();
 			this.models.clearAndDisposeAll();
 			this.instructorModels.clearAndDisposeAll();
 			this.learnerModelListeners.clearAndDisposeAll();
@@ -646,7 +662,6 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this._activeResource = undefined;
 		this.replayActiveResource = undefined;
 		this.pendingActiveResource = undefined;
-		this.surface?.clear();
 		this.terminalReplay.reset({ terminals: checkpoint.terminals, activeTerminalId: checkpoint.activeTerminalId });
 
 		for (const entry of checkpoint.entries) {
@@ -1167,9 +1182,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			totalEventCount: this.cursor.totalEventCount,
 		});
 		this.narrationPlayback.update(this._state);
-		this.surface?.showBrowserState(
-			findCodeScrimBrowserState(this.activeDraft.browser, position),
-			findCodeScrimBrowserThumbnail(this.activeDraft.browser, position));
+		this.surface?.showBrowserSnapshot(findCodeScrimBrowserSnapshot(this.activeDraft.browser, position));
 		this._onDidChangeState.fire(this._state);
 	}
 
@@ -1197,7 +1210,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	private publishIdle(): void {
 		this._state = Object.freeze({ status: 'idle' });
 		this.narrationPlayback.update(this._state);
-		this.surface?.showBrowserState(undefined);
+		this.surface?.showBrowserSnapshot(undefined);
 		this._onDidChangeState.fire(this._state);
 	}
 
