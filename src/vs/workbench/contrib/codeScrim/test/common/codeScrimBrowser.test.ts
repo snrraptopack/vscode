@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { findCodeScrimBrowserSnapshot, findCodeScrimVisiblePage, ICodeScrimBrowserTrack } from '../../common/codeScrimBrowser.js';
+import { findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot, findCodeScrimVisiblePage, ICodeScrimBrowserTrack } from '../../common/codeScrimBrowser.js';
 
 suite('CodeScrimBrowser', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -20,6 +20,11 @@ suite('CodeScrimBrowser', () => {
 			{ timestamp: 50, pageId: 'one', visible: true },
 			{ timestamp: 400, pageId: 'one', visible: false },
 			{ timestamp: 450, pageId: 'two', visible: true },
+		],
+		scrolls: [
+			{ timestamp: 110, pageId: 'one', scrollLeft: 0, scrollTop: 20 },
+			{ timestamp: 250, pageId: 'one', scrollLeft: 0, scrollTop: 220 },
+			{ timestamp: 510, pageId: 'two', scrollLeft: 0, scrollTop: 80 },
 		],
 	};
 
@@ -59,9 +64,17 @@ suite('CodeScrimBrowser', () => {
 				{ timestamp: 400, pageId: 'one', visible: false },
 				{ timestamp: 420, pageId: 'two', visible: true },
 			],
+			scrolls: [],
 		};
 
 		assert.strictEqual(findCodeScrimBrowserSnapshot(partial, 430)?.html, '<html>one-a</html>');
 		assert.strictEqual(findCodeScrimVisiblePage(partial, 25), undefined);
+	});
+
+	test('resolves viewport movement independently of DOM snapshots', () => {
+		assert.strictEqual(findCodeScrimBrowserScroll(track, 100, 'one'), undefined);
+		assert.strictEqual(findCodeScrimBrowserScroll(track, 200, 'one')?.scrollTop, 20);
+		assert.strictEqual(findCodeScrimBrowserScroll(track, 350, 'one')?.scrollTop, 220);
+		assert.strictEqual(findCodeScrimBrowserScroll(track, 600, 'two')?.scrollTop, 80);
 	});
 });

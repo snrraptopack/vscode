@@ -57,7 +57,40 @@ function init() {
 	});
 	document.addEventListener('input', reportContentChange, true);
 	document.addEventListener('change', reportContentChange, true);
-	window.addEventListener('scroll', reportContentChange, true);
+	document.addEventListener('pointerover', reportContentChange, true);
+	document.addEventListener('pointerout', reportContentChange, true);
+	document.addEventListener('pointerdown', reportContentChange, true);
+	document.addEventListener('pointerup', reportContentChange, true);
+	document.addEventListener('focusin', reportContentChange, true);
+	document.addEventListener('focusout', reportContentChange, true);
+	document.addEventListener('selectionchange', reportContentChange, true);
+	window.addEventListener('resize', reportContentChange, true);
+	window.addEventListener('transitionend', reportContentChange, true);
+	window.addEventListener('animationend', reportContentChange, true);
+
+	// Scrolling is high frequency but does not mutate the document. Report it on
+	// its own animation-frame paced channel so consumers can record viewport
+	// motion without serializing the complete DOM for every wheel tick.
+	let scrollFramePending = false;
+	window.addEventListener('scroll', event => {
+		if (event.target !== document && event.target !== window) {
+			// Element scroll offsets are serialized into the next DOM state. They
+			// are less common than root scrolling and do not need their own track.
+			reportContentChange();
+			return;
+		}
+		if (scrollFramePending) {
+			return;
+		}
+		scrollFramePending = true;
+		window.requestAnimationFrame(() => {
+			scrollFramePending = false;
+			ipcRenderer.send('vscode:browserView:scrolled', {
+				scrollX: window.scrollX,
+				scrollY: window.scrollY,
+			});
+		});
+	}, true);
 
 	// #######################################################################
 	// ###                                                                 ###
@@ -287,7 +320,6 @@ function init() {
 				const replayElements = clone.querySelectorAll('*');
 				// Replay is passive: strip scripts and event-bearing attributes so the
 				// reconstructed document can never execute recorded page content.
-				clone.querySelectorAll('script').forEach(script => script.remove());
 				replayElements.forEach((element, index) => {
 					for (const attribute of [...element.attributes]) {
 						if (attribute.name.toLowerCase().startsWith('on')) {
@@ -315,12 +347,22 @@ function init() {
 							element.setAttribute('data-vscode-codescrim-scroll-left', String(source.scrollLeft));
 						}
 					}
+					markInteractionState(source, element);
+					captureMediaState(source, element);
 				});
+				clone.querySelectorAll('script').forEach(script => script.remove());
 				const head = clone.querySelector('head');
 				if (head) {
 					const base = clone.ownerDocument.createElement('base');
 					base.setAttribute('href', document.baseURI);
 					head.prepend(base);
+					const interactionStyles = captureInteractionStyles();
+					if (interactionStyles) {
+						const style = clone.ownerDocument.createElement('style');
+						style.setAttribute('data-vscode-codescrim-interaction-styles', '');
+						style.textContent = interactionStyles;
+						head.append(style);
+					}
 				}
 				return {
 					html: '<!DOCTYPE html>' + clone.outerHTML,
@@ -2385,6 +2427,69 @@ class AreaPicker {
 		`;
 		return style;
 	}
+}
+
+const interactionStates = [
+	{ selector: ':focus-visible', attribute: 'data-vscode-codescrim-focus-visible' },
+	{ selector: ':focus-within', attribute: 'data-vscode-codescrim-focus-within' },
+	{ selector: ':hover', attribute: 'data-vscode-codescrim-hover' },
+	{ selector: ':active', attribute: 'data-vscode-codescrim-active' },
+	{ selector: ':focus', attribute: 'data-vscode-codescrim-focus' },
+] as const;
+
+function markInteractionState(source: Element, replay: Element): void {
+	for (const state of interactionStates) {
+		try {
+			if (source.matches(state.selector)) {
+				replay.setAttribute(state.attribute, '');
+			}
+		} catch {
+			// A browser-specific selector implementation should not invalidate the snapshot.
+		}
+	}
+}
+
+/** Copies paint-only media that cannot be reconstructed from element markup. */
+function captureMediaState(source: Element, replay: Element): void {
+	try {
+		if (source instanceof HTMLCanvasElement && replay instanceof HTMLCanvasElement) {
+			const image = source.toDataURL('image/png');
+			replay.style.backgroundImage = `url(${JSON.stringify(image)})`;
+			replay.style.backgroundSize = '100% 100%';
+			replay.style.backgroundRepeat = 'no-repeat';
+		} else if (source instanceof HTMLVideoElement && replay instanceof HTMLVideoElement && source.readyState >= 2) {
+			const canvas = document.createElement('canvas');
+			canvas.width = Math.max(1, source.videoWidth);
+			canvas.height = Math.max(1, source.videoHeight);
+			canvas.getContext('2d')?.drawImage(source, 0, 0, canvas.width, canvas.height);
+			replay.setAttribute('poster', canvas.toDataURL('image/png'));
+			replay.removeAttribute('autoplay');
+		}
+	} catch {
+		// Cross-origin/tainted media remains represented by its safe original markup.
+	}
+}
+
+/** Rebinds CSS-only interaction selectors to the state attributes in the clone. */
+function captureInteractionStyles(): string {
+	const captured: string[] = [];
+	for (const sheet of document.styleSheets) {
+		try {
+			for (const rule of sheet.cssRules) {
+				if (!interactionStates.some(state => rule.cssText.includes(state.selector))) {
+					continue;
+				}
+				let text = rule.cssText;
+				for (const state of interactionStates) {
+					text = text.replaceAll(state.selector, `[${state.attribute}]`);
+				}
+				captured.push(text);
+			}
+		} catch {
+			// Cross-origin stylesheets cannot expose cssRules; their normal link remains.
+		}
+	}
+	return captured.join('\n');
 }
 
 init();

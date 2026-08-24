@@ -462,6 +462,12 @@ export interface IBrowserDeviceProfile {
 	readonly deviceScaleFactor?: number;
 }
 
+/** Root viewport position reported by an Integrated Browser page. */
+export interface IBrowserViewScrollEvent {
+	readonly scrollX: number;
+	readonly scrollY: number;
+}
+
 /**
  * This should match the isolated world ID defined in `preload-browserView.ts`.
  */
@@ -479,6 +485,7 @@ export interface IBrowserViewService {
 	onDynamicDidNavigate(id: string): Event<IBrowserViewNavigationEvent>;
 	onDynamicDidChangeLoadingState(id: string): Event<IBrowserViewLoadingEvent>;
 	onDynamicDidChangeContent(id: string): Event<void>;
+	onDynamicDidScroll(id: string): Event<IBrowserViewScrollEvent>;
 	onDynamicDidChangeFocus(id: string): Event<IBrowserViewFocusEvent>;
 	onDynamicDidChangeVisibility(id: string): Event<IBrowserViewVisibilityEvent>;
 	onDynamicDidChangeDevToolsState(id: string): Event<IBrowserViewDevToolsStateEvent>;

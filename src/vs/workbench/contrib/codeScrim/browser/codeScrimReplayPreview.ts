@@ -9,7 +9,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
 import { EndOfLineSequence, ITextModel } from '../../../../editor/common/model.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
-import { findCodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
+import { findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, CodeScrimTerminalEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingDraft, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { findCodeScrimCheckpoint, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CodeScrimTerminalReplay } from './codeScrimTerminalReplay.js';
@@ -44,7 +44,8 @@ export class CodeScrimReplayPreview extends Disposable {
 			{ terminals: checkpoint.terminals, activeTerminalId: checkpoint.activeTerminalId },
 			events.filter((event): event is CodeScrimTerminalEvent => event.domain === 'terminal'),
 		);
-		surface?.showBrowserSnapshot(findCodeScrimBrowserSnapshot(draft.browser, target));
+		const browserSnapshot = findCodeScrimBrowserSnapshot(draft.browser, target);
+		surface?.showBrowserSnapshot(browserSnapshot, findCodeScrimBrowserScroll(draft.browser, target, browserSnapshot?.pageId)?.scrollTop);
 	}
 
 	clear(): void {

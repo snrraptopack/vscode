@@ -32,6 +32,14 @@ export interface ICodeScrimBrowserVisibility {
 	readonly visible: boolean;
 }
 
+/** A lightweight root viewport update, independent of serialized DOM state. */
+export interface ICodeScrimBrowserScroll {
+	readonly timestamp: number;
+	readonly pageId: string;
+	readonly scrollLeft: number;
+	readonly scrollTop: number;
+}
+
 /**
  * Passive browser recording. Snapshots reconstruct the recorded DOM in the
  * lesson surface; the learner interacts with the same surface, so instructor
@@ -40,6 +48,7 @@ export interface ICodeScrimBrowserVisibility {
 export interface ICodeScrimBrowserTrack {
 	readonly snapshots: readonly ICodeScrimBrowserSnapshot[];
 	readonly visibility: readonly ICodeScrimBrowserVisibility[];
+	readonly scrolls: readonly ICodeScrimBrowserScroll[];
 }
 
 /** Resolves the instructor browser page visible at a timeline position. */
@@ -84,6 +93,21 @@ export function findCodeScrimBrowserSnapshot(track: ICodeScrimBrowserTrack | und
 		}
 	}
 	return fallback;
+}
+
+/** Resolves the latest viewport position of the page visible at a timeline position. */
+export function findCodeScrimBrowserScroll(track: ICodeScrimBrowserTrack | undefined, position: number, pageId?: string): ICodeScrimBrowserScroll | undefined {
+	if (!track) {
+		return undefined;
+	}
+	pageId ??= findCodeScrimVisiblePage(track, position);
+	for (let index = findLastTimestamp(track.scrolls, position); index >= 0; index--) {
+		const scroll = track.scrolls[index];
+		if (!pageId || scroll.pageId === pageId) {
+			return scroll;
+		}
+	}
+	return undefined;
 }
 
 function findLastTimestamp(entries: readonly { readonly timestamp: number }[], position: number): number {

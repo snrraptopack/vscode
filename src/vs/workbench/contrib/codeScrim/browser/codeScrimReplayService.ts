@@ -19,7 +19,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
-import { findCodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
+import { findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
@@ -134,6 +134,21 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			return;
 		}
 		this.previewReplay.show(this.activeDraft, position, this.surface, this.terminalReplay);
+	}
+
+	async openRecordedBrowserPage(query: string): Promise<boolean> {
+		const snapshots = this.activeDraft?.browser?.snapshots;
+		const needle = query.trim().toLocaleLowerCase();
+		if (!snapshots?.length || !needle) {
+			return false;
+		}
+		const exact = snapshots.find(snapshot => snapshot.url.toLocaleLowerCase() === needle || snapshot.title.toLocaleLowerCase() === needle);
+		const match = exact ?? snapshots.find(snapshot => snapshot.url.toLocaleLowerCase().includes(needle) || snapshot.title.toLocaleLowerCase().includes(needle));
+		if (!match) {
+			return false;
+		}
+		await this.seek(match.timestamp);
+		return true;
 	}
 
 	async seek(position: number): Promise<void> {
@@ -405,8 +420,11 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		if (activeResource && activeModel) {
 			surface.openResource(activeResource, activeModel);
 		}
-		surface.showBrowserSnapshot(this.activeDraft && this._state.status !== 'idle'
+		const snapshot = this.activeDraft && this._state.status !== 'idle'
 			? findCodeScrimBrowserSnapshot(this.activeDraft.browser, this._state.position)
+			: undefined;
+		surface.showBrowserSnapshot(snapshot, this.activeDraft
+			? findCodeScrimBrowserScroll(this.activeDraft.browser, this._state.status === 'idle' ? 0 : this._state.position, snapshot?.pageId)?.scrollTop
 			: undefined);
 		return toDisposable(() => {
 			if (this.surface === surface) {
@@ -1182,7 +1200,8 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			totalEventCount: this.cursor.totalEventCount,
 		});
 		this.narrationPlayback.update(this._state);
-		this.surface?.showBrowserSnapshot(findCodeScrimBrowserSnapshot(this.activeDraft.browser, position));
+		const browserSnapshot = findCodeScrimBrowserSnapshot(this.activeDraft.browser, position);
+		this.surface?.showBrowserSnapshot(browserSnapshot, findCodeScrimBrowserScroll(this.activeDraft.browser, position, browserSnapshot?.pageId)?.scrollTop);
 		this._onDidChangeState.fire(this._state);
 	}
 

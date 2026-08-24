@@ -25,7 +25,7 @@ suite('CodeScrimPackageCodec', () => {
 			decoded,
 			plaintextVisible: encoded.toString().includes('private source text'),
 		}, {
-			header: { packageId: 'package-test', keyId: 'author-key', major: 6, minor: 0 },
+			header: { packageId: 'package-test', keyId: 'author-key', major: 7, minor: 0 },
 			decoded: draft,
 			plaintextVisible: false,
 		});
@@ -96,6 +96,7 @@ function createDraft(): ICodeScrimRecordingDraft {
 		browser: {
 			snapshots: [{ timestamp: 750, pageId: 'page-1', url: 'http://localhost:3000', title: 'Lesson', scrollTop: 120, html: '<html><body>Lesson</body></html>' }],
 			visibility: [{ timestamp: 500, pageId: 'page-1', visible: true }, { timestamp: 2_500, pageId: 'page-1', visible: false }],
+			scrolls: [{ timestamp: 800, pageId: 'page-1', scrollLeft: 0, scrollTop: 180 }],
 		},
 		narration: {
 			segments: [{ start: 500, duration: 1_000, mimeType: 'audio/webm;codecs=opus', data: 'dm9pY2U=' }],

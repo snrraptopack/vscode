@@ -7,7 +7,7 @@ import { screen, WebContentsView, webContents } from 'electron';
 import { Disposable } from '../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { VSBuffer } from '../../../base/common/buffer.js';
-import { IBrowserViewAudience, IBrowserViewBounds, IBrowserViewDevToolsStateEvent, IBrowserViewFocusEvent, IBrowserViewKeyDownEvent, IBrowserViewState, IBrowserViewNavigationEvent, IBrowserViewLoadingEvent, IBrowserViewLoadError, IBrowserViewTitleChangeEvent, IBrowserViewFaviconChangeEvent, IBrowserViewCaptureScreenshotOptions, IBrowserViewFindInPageOptions, IBrowserViewFindInPageResult, IBrowserViewVisibilityEvent, browserViewIsolatedWorldId, browserZoomFactors, browserZoomDefaultIndex, IBrowserViewOwner, IBrowserViewOpenOptions, IBrowserViewPermissionRequestEvent, equalsBrowserViewAudience, isBrowserViewAssociatedResourceNavigation, matchesBrowserViewAudience } from '../common/browserView.js';
+import { IBrowserViewAudience, IBrowserViewBounds, IBrowserViewDevToolsStateEvent, IBrowserViewFocusEvent, IBrowserViewKeyDownEvent, IBrowserViewState, IBrowserViewNavigationEvent, IBrowserViewLoadingEvent, IBrowserViewLoadError, IBrowserViewTitleChangeEvent, IBrowserViewFaviconChangeEvent, IBrowserViewCaptureScreenshotOptions, IBrowserViewFindInPageOptions, IBrowserViewFindInPageResult, IBrowserViewVisibilityEvent, browserViewIsolatedWorldId, browserZoomFactors, browserZoomDefaultIndex, IBrowserViewOwner, IBrowserViewOpenOptions, IBrowserViewPermissionRequestEvent, IBrowserViewScrollEvent, equalsBrowserViewAudience, isBrowserViewAssociatedResourceNavigation, matchesBrowserViewAudience } from '../common/browserView.js';
 import { BrowserViewEmulator } from './browserViewEmulator.js';
 import { BrowserViewInspector } from './browserViewInspector.js';
 import { IWindowsMainService } from '../../windows/electron-main/windows.js';
@@ -83,6 +83,9 @@ export class BrowserView extends Disposable {
 
 	private readonly _onDidChangeContent = this._register(new Emitter<void>());
 	readonly onDidChangeContent: Event<void> = this._onDidChangeContent.event;
+
+	private readonly _onDidScroll = this._register(new Emitter<IBrowserViewScrollEvent>());
+	readonly onDidScroll: Event<IBrowserViewScrollEvent> = this._onDidScroll.event;
 
 	private readonly _onDidChangeFocus = this._register(new Emitter<IBrowserViewFocusEvent>());
 	readonly onDidChangeFocus: Event<IBrowserViewFocusEvent> = this._onDidChangeFocus.event;
@@ -472,6 +475,14 @@ export class BrowserView extends Disposable {
 		};
 		webContents.ipc.on('vscode:browserView:contentChanged', onContentChanged);
 		this._register({ dispose: () => webContents.ipc.removeListener('vscode:browserView:contentChanged', onContentChanged) });
+		const onScrolled = (event: Electron.IpcMainEvent, candidate: unknown) => {
+			if (event.senderFrame !== webContents.mainFrame || !isBrowserViewScrollEvent(candidate)) {
+				return;
+			}
+			this._onDidScroll.fire(candidate);
+		};
+		webContents.ipc.on('vscode:browserView:scrolled', onScrolled);
+		this._register({ dispose: () => webContents.ipc.removeListener('vscode:browserView:scrolled', onScrolled) });
 		webContents.on('devtools-opened', () => {
 			// Avoid double-registration if the webContents is reused.
 			webContents.devToolsWebContents?.ipc.off('vscode:browserView:keydown', onCommandKeydown);
@@ -1134,4 +1145,13 @@ function isTrackableHistoryUrl(url: string): boolean {
 	}
 	const scheme = url.substring(0, colon).toLowerCase();
 	return scheme === 'http' || scheme === 'https' || scheme === 'file';
+}
+
+function isBrowserViewScrollEvent(candidate: unknown): candidate is IBrowserViewScrollEvent {
+	if (!candidate || typeof candidate !== 'object') {
+		return false;
+	}
+	const event = candidate as { scrollX?: unknown; scrollY?: unknown };
+	return typeof event.scrollX === 'number' && Number.isFinite(event.scrollX)
+		&& typeof event.scrollY === 'number' && Number.isFinite(event.scrollY);
 }

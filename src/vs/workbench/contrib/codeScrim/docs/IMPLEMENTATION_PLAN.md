@@ -92,12 +92,17 @@ Current vertical-slice note: record, stop, recovery across restart, encrypted sa
 
 ## Milestone 3: Native browser integration
 
-- [x] Add one-click instructor and learner entry points backed by the native Integrated Browser.
-- [x] Capture visible instructor browser frames and navigation metadata into encrypted, content-addressed packages.
-- [x] Replay the instructor's visual browser state without loading recorded URLs or executing page content.
-- Record structured viewport, console, network, scroll, and interaction metadata through browser model/CDP services.
+- [x] Host the instructor's real Integrated Browser model in a resizable native auxiliary window without creating an editor tab.
+- [x] Capture visible instructor DOM states and navigation metadata into encrypted, content-addressed packages.
+- [x] Replay passive instructor browser state in a separate resizable learner auxiliary window without loading recorded URLs or executing page content.
+- [x] Record root viewport scrolling as a lightweight animation-frame-paced track, independent of DOM snapshots.
+- [x] Keep target-blank/popup pages in the standalone instructor browser and record instructor tab activation.
+- [x] Capture form values, focus, hover, active state, nested-element scroll, and safe canvas/video paint state with coalesced DOM checkpoints.
+- [x] Let the learner address/search field seek to URLs and titles contained in the recording without issuing a network request.
+- Record structured viewport size, text selection ranges, console, network, download, permission, dialog, and richer pointer metadata through browser model/CDP services.
 - Keep passive recorded browser presentation separate from a learner's live browser: opening or seeking a recording must not start the instructor's server or issue recorded network requests.
-- [x] Open the interactive learner browser only after an explicit My Preview action.
+- [x] Keep the lesson editor canvas code-only and provide a title-bar action to reopen the passive learner browser window.
+- Add an explicitly launched live learner browser after sandboxed execution and port discovery exist.
 - Connect My Preview to explicitly started learner execution, with detected ports and provider capabilities determining how local addresses are exposed.
 - Integrate native DevTools.
 

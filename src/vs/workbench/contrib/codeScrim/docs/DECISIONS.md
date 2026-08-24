@@ -14,7 +14,7 @@ Reason: the product must coordinate real editor, terminal, debug, browser, layou
 
 Status: accepted.
 
-Course discovery and lesson controls use native editor inputs and panes. The layout controller opens real code and browser editors alongside the lesson surface.
+Course discovery and lesson controls use native editor inputs and panes. Code remains in the lesson editor; browser authoring and passive browser replay use resizable native auxiliary windows so neither consumes or splits the coding canvas.
 
 Reason: the learning interface should feel like the primary product, while preserving standard workbench editor behavior.
 
@@ -28,7 +28,7 @@ Recorded code changes play through real Monaco text models and editors. Code is 
 
 Status: accepted.
 
-CodeScrim uses VS Code's `WebContentsView` browser editor, browser model, DevTools, and CDP service. The external browser-extension/rrweb prototype architecture is not carried forward.
+CodeScrim uses VS Code's `WebContentsView` browser model, DevTools, and CDP service. The model is hosted directly in a native auxiliary window rather than opened as an editor tab. The external browser-extension/rrweb prototype architecture is not carried forward.
 
 rrweb may later be evaluated as an optional visual fallback only.
 

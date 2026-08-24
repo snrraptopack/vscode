@@ -21,9 +21,7 @@ import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/
 import { ActiveEditorContext } from '../../../common/contextkeys.js';
 import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
-import { IEditorService, SIDE_GROUP } from '../../../services/editor/common/editorService.js';
-import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
-import { IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
+import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { TerminalContextKeys } from '../../terminal/common/terminalContextKey.js';
 import { CODE_SCRIM_OPEN_AUTHOR_BROWSER_COMMAND_ID, CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, CODE_SCRIM_TOGGLE_LESSON_BROWSER_COMMAND_ID } from '../common/codeScrimBrowser.js';
 import { CODE_SCRIM_OPEN_RECORDING_COMMAND_ID, CODE_SCRIM_PACKAGE_EXTENSION, CODE_SCRIM_SAVE_RECORDING_COMMAND_ID, ICodeScrimPackageService } from '../common/codeScrimPackage.js';
@@ -34,6 +32,7 @@ import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, CODE_SCRIM_OPEN_DEMO_LESSON_COM
 import { CodeScrimCourseEditor } from './codeScrimCourseEditor.js';
 import { CodeScrimCourseEditorInput } from './codeScrimCourseEditorInput.js';
 import { CodeScrimAuthoringDockContribution } from './codeScrimAuthoringDock.js';
+import { CodeScrimBrowserWindowService, ICodeScrimBrowserWindowService } from './codeScrimBrowserWindowService.js';
 import { CodeScrimLayoutService } from './codeScrimLayoutService.js';
 import { CodeScrimLearnerWorkspaceService } from './codeScrimLearnerWorkspaceService.js';
 import { CodeScrimLessonEditor } from './codeScrimLessonEditor.js';
@@ -49,6 +48,7 @@ registerSingleton(ICodeScrimLearnerWorkspaceService, CodeScrimLearnerWorkspaceSe
 registerSingleton(ICodeScrimPackageService, CodeScrimPackageService, InstantiationType.Delayed);
 registerSingleton(ICodeScrimRecorderService, CodeScrimRecorderService, InstantiationType.Eager);
 registerSingleton(ICodeScrimReplayService, CodeScrimReplayService, InstantiationType.Delayed);
+registerSingleton(ICodeScrimBrowserWindowService, CodeScrimBrowserWindowService, InstantiationType.Delayed);
 
 class CodeScrimRecordingControlsContribution {
 
@@ -172,16 +172,13 @@ registerAction2(class extends Action2 {
 				id: MenuId.TitleBar,
 				group: 'navigation',
 				order: 8990,
-				when: ContextKeyExpr.and(
-					ActiveEditorContext.notEqualsTo(CodeScrimLessonEditorInput.EDITOR_ID),
-					ActiveEditorContext.notEqualsTo(BrowserEditorInput.ID),
-				),
+				when: ActiveEditorContext.notEqualsTo(CodeScrimLessonEditorInput.EDITOR_ID),
 			},
 		});
 	}
 
 	run(accessor: ServicesAccessor): Promise<void> {
-		return openCodeScrimBrowser(accessor, 'codescrim-author-browser', localize('codeScrim.authorBrowserTitle', "CodeScrim Browser"));
+		return accessor.get(ICodeScrimBrowserWindowService).openAuthorWindow();
 	}
 });
 
@@ -220,7 +217,7 @@ registerAction2(class extends Action2 {
 	}
 
 	run(accessor: ServicesAccessor): Promise<void> {
-		return openCodeScrimBrowser(accessor, 'codescrim-learner-browser', localize('codeScrim.learnerBrowserTitle', "My Preview"));
+		return accessor.get(ICodeScrimBrowserWindowService).toggleLearnerWindow();
 	}
 });
 
@@ -577,13 +574,6 @@ async function openRecordingPreview(editorService: IEditorService, instantiation
 		duration: Math.ceil(draft.duration / 1000),
 	};
 	await editorService.openEditor(instantiationService.createInstance(CodeScrimLessonEditorInput, previewLesson), { pinned: true });
-}
-
-async function openCodeScrimBrowser(accessor: ServicesAccessor, id: string, title: string): Promise<void> {
-	const browserViewService = accessor.get(IBrowserViewWorkbenchService);
-	const editorService = accessor.get(IEditorService);
-	const input = browserViewService.getOrCreateLazy(id, { url: 'about:blank', title });
-	await editorService.openEditor(input, { pinned: true }, SIDE_GROUP);
 }
 
 function parseLessonDescriptor(serializedEditor: string): ICodeScrimLessonDescriptor | undefined {

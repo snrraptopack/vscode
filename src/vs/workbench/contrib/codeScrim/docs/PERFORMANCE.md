@@ -33,7 +33,7 @@ Required direction:
 
 ### Browser visual capture
 
-The first browser slice requests a JPEG screenshot of each visible instructor Integrated Browser at most every 750 ms and drops byte-identical consecutive frames. Static pages deduplicate well. Animations, video, cursor blinking, timers, and frequently changing development pages can produce a new frame every interval, making raw base64 strings expensive in both memory and package size.
+Browser replay stores sanitized, content-addressed DOM states after settled mutations. Root scrolling is deliberately excluded from DOM snapshot capture and recorded as animation-frame-paced numeric viewport events; this prevents a long wheel gesture from repeatedly serializing and reconciling the entire page. Frequently mutating applications can still create many distinct DOM states, so capture duration, deduplication ratio, and live-draft memory remain explicit performance metrics.
 
 Required direction:
 

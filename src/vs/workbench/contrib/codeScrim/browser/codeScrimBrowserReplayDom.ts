@@ -22,8 +22,22 @@ export function applyCodeScrimBrowserReplayDom(frame: HTMLIFrameElement, html: s
 		return false;
 	}
 	reconcileNode(currentDocument.documentElement, targetDocument.documentElement, currentDocument);
+	restoreElementScrollPositions(currentDocument);
 	installPassiveNavigationGuards(currentDocument);
 	return true;
+}
+
+function restoreElementScrollPositions(document: Document): void {
+	// The selector targets markers embedded in an arbitrary recorded document;
+	// these elements cannot be retained as stable construction-time references.
+	// eslint-disable-next-line no-restricted-syntax
+	for (const element of document.querySelectorAll<HTMLElement>('[data-vscode-codescrim-scroll-top], [data-vscode-codescrim-scroll-left]')) {
+		const top = Number(element.getAttribute('data-vscode-codescrim-scroll-top') ?? 0);
+		const left = Number(element.getAttribute('data-vscode-codescrim-scroll-left') ?? 0);
+		if (Number.isFinite(top) && Number.isFinite(left)) {
+			element.scrollTo(left, top);
+		}
+	}
 }
 
 function reconcileNode(current: Node, target: Node, ownerDocument: Document): void {

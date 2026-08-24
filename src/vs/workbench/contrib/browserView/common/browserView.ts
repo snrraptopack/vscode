@@ -54,6 +54,7 @@ import {
 	IBrowserDeviceProfile,
 	IBrowserViewPermissionRequestEvent,
 	IBrowserElementSelectionState,
+	IBrowserViewScrollEvent,
 } from '../../../../platform/browserView/common/browserView.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { isLocalhostAuthority } from '../../../../platform/url/common/trustedDomains.js';
@@ -386,6 +387,7 @@ export interface IBrowserViewModel extends IDisposable {
 	readonly onDidNavigate: Event<IBrowserViewNavigationEvent>;
 	readonly onDidChangeLoadingState: Event<IBrowserViewLoadingEvent>;
 	readonly onDidChangeContent: Event<void>;
+	readonly onDidScroll: Event<IBrowserViewScrollEvent>;
 	readonly onDidChangeFocus: Event<IBrowserViewFocusEvent>;
 	readonly onDidChangeDevToolsState: Event<IBrowserViewDevToolsStateEvent>;
 	readonly onDidKeyCommand: Event<IBrowserViewKeyDownEvent>;
@@ -672,6 +674,10 @@ export class BrowserViewModel extends Disposable implements IBrowserViewModel {
 
 	get onDidChangeContent(): Event<void> {
 		return this.browserViewService.onDynamicDidChangeContent(this.id);
+	}
+
+	get onDidScroll(): Event<IBrowserViewScrollEvent> {
+		return this.browserViewService.onDynamicDidScroll(this.id);
 	}
 
 	get onDidChangeFocus(): Event<IBrowserViewFocusEvent> {

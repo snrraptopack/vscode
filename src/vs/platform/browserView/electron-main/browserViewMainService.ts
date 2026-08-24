@@ -169,6 +169,10 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
 		return this._getBrowserView(id).onDidChangeContent;
 	}
 
+	onDynamicDidScroll(id: string) {
+		return this._getBrowserView(id).onDidScroll;
+	}
+
 	onDynamicDidChangeFocus(id: string) {
 		return this._getBrowserView(id).onDidChangeFocus;
 	}

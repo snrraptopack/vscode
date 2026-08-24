@@ -120,7 +120,7 @@ Validates manifests, streams event chunks and media, verifies hashes, and perfor
 
 ### Integrated browser
 
-- `IBrowserViewWorkbenchService` owns native browser editor inputs and models.
+- `IBrowserViewWorkbenchService` owns native browser inputs and models; CodeScrim lays its authoring model out directly inside a resizable auxiliary window without creating an editor tab.
 - `IBrowserViewModel` provides navigation, permissions, storage, screenshots, DevTools, selection, and device state.
 - `IBrowserViewCDPService` captures Console, Network, Runtime, DOM, Page, and Storage domain events.
 - Browser state belongs to a lesson-scoped browser context so authentication and storage can be isolated or restored deliberately.
@@ -137,12 +137,14 @@ Validates manifests, streams event chunks and media, verifies hashes, and perfor
 
 ## Browser capture and replay
 
-- The instructor opens the core Integrated Browser through a CodeScrim title-bar action. CodeScrim does not ship or invoke the Simple Browser extension.
-- Recording captures serialized DOM states of visible instructor pages through the preloaded isolated-world helper: the live document is cloned, scripts and event-handler attributes are stripped, and live form state is persisted before the state leaves the page. An isolated `MutationObserver` plus input, change, scroll, and navigation signals marks the page dirty after fetch-driven renders and instructor interaction. CodeScrim coalesces those signals, captures the settled state on the session clock, and deduplicates identical states.
-- Browser replay is DOM-state reconstruction, not video and not live re-navigation: the Lesson Preview parses each recorded state as trusted passive HTML and reconciles it into one persistent sandboxed iframe. The frame document is not replaced between states, avoiding white flashes and preserving the continuity expected from editor replay. Recorded page scripts are never executed.
-- The replay surface is the same element the learner interacts with, mirroring the code replay model: during playback it shows the instructor's DOM state; learner interaction happens on real DOM in the same surface.
+- The instructor opens the core Integrated Browser through a CodeScrim title-bar action. The real `WebContentsView` is hosted in a dedicated native auxiliary window, leaving the editor grid untouched. CodeScrim does not ship or invoke the Simple Browser extension.
+- Recording captures serialized DOM states of visible instructor pages through the preloaded isolated-world helper: the live document is cloned, scripts and event-handler attributes are stripped, and live form, focus, hover, active, nested-scroll, canvas, and capturable video-frame state is persisted before the state leaves the page. An isolated `MutationObserver` plus input, pointer, focus, selection, transition, animation, resize, scroll, and navigation signals marks the page dirty after fetch-driven renders and instructor interaction. CodeScrim coalesces those signals, captures the settled state on the session clock, and deduplicates identical states.
+- Popup and target-blank pages whose opener is a CodeScrim page stay inside the standalone author browser as native browser tabs. Tab activation is recorded through page visibility, so replay follows the instructor across deep and same-document navigation instead of opening editor tabs.
+- Browser replay is DOM-state reconstruction, not video and not live re-navigation: a dedicated learner auxiliary window parses each recorded state as trusted passive HTML and reconciles it into one persistent sandboxed iframe. The frame document is not replaced between states, avoiding white flashes and preserving the continuity expected from editor replay. Recorded page scripts are never executed.
+- Root viewport motion is a lightweight event track applied directly to the persistent replay document; nested element offsets ride with coalesced DOM states. The learner address/search field seeks only among pages present in the recording. Browser replay never occupies the lesson editor canvas; closing its window leaves code playback running and the lesson title-bar action reopens it at the current state.
+- Cross-origin iframe internals, streaming network bodies, live canvas/WebGL animation, and continuously changing audio/video frames require dedicated capture tracks or a bounded visual fallback; DOM serialization does not pretend to reproduce them.
 - Snapshots are content-addressed and encrypted with the rest of the `.scrim`; URLs are metadata rather than replay instructions.
-- My Preview is a separate native Integrated Browser opened only by learner action. Its history, execution, and network effects are not instructor replay state.
+- A future live learner browser remains separate from the passive Lesson Preview. Its history, execution, and network effects will not become instructor replay state.
 - Full DOM states are the first correct event representation. A later package optimization may encode intermediate states as DOM patches between periodic full checkpoints without changing replay behavior. Console and network metadata can augment this track without making passive replay execute requests or page scripts.
 
 ## Native UI composition
@@ -162,7 +164,7 @@ The active lesson initially owns a fixed native workspace inside the editor area
 
 `ICodeScrimLayoutService` leases the surrounding workbench layout while a lesson is visible. It hides document tabs, editor-group actions, the global layout controls, activity bar, normal sidebars, panel, and status bar. Attempts to reopen those workbench parts during the lease are rejected so they cannot squeeze or split the lesson. Every prior visibility and option value is restored when the last lesson lease closes. The visibility snapshot is also persisted before the lease changes the native layout, allowing the next startup to recover the author workbench if the window exits while a lesson is open.
 
-Playback still targets real workbench surfaces: normal Monaco text models and editors, the native browser editor, terminal instances, and debug services. The lesson shell must not embed simulated copies of those surfaces.
+Playback still targets real workbench surfaces: normal Monaco text models and editors, a native auxiliary browser replay window, terminal instances, and debug services. The lesson shell does not embed a browser pane or browser editor tab.
 
 The initial implementation does not modify `EditorPart`. If a later design requires a transport spanning all editor groups, that change must be justified by an architecture decision and recorded as an upstream integration point.
 

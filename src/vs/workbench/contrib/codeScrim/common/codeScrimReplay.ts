@@ -95,7 +95,7 @@ export interface ICodeScrimReplaySurface {
 	applyScroll(resource: ICodeScrimWorkspaceResource, position: ICodeScrimScrollPosition): void;
 	closeResource(resource: ICodeScrimWorkspaceResource): void;
 	previewResource(resource: ICodeScrimWorkspaceResource, model: ITextModel, selections?: readonly ICodeScrimSelection[], scrollPosition?: ICodeScrimScrollPosition): void;
-	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined): void;
+	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop?: number): void;
 	clear(preserveBrowser?: boolean): void;
 }
 
@@ -301,6 +301,8 @@ export interface ICodeScrimReplayService {
 	restart(): Promise<boolean>;
 	/** Preview the browser track without rebuilding the learner workspace. */
 	preview(position: number): void;
+	/** Seek to a recorded browser page by URL or title. */
+	openRecordedBrowserPage(query: string): Promise<boolean>;
 	seek(position: number): Promise<void>;
 	pause(): Promise<void>;
 	beginLearnerEdit(): void;

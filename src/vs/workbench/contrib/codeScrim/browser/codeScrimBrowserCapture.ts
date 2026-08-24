@@ -9,9 +9,9 @@ import { Disposable, DisposableMap, DisposableStore } from '../../../../base/com
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
-import { ICodeScrimBrowserSnapshot, ICodeScrimBrowserTrack, ICodeScrimBrowserVisibility } from '../common/codeScrimBrowser.js';
+import { ICodeScrimBrowserScroll, ICodeScrimBrowserSnapshot, ICodeScrimBrowserTrack, ICodeScrimBrowserVisibility } from '../common/codeScrimBrowser.js';
 
-const SNAPSHOT_SETTLE_DELAY_MS = 300;
+const SNAPSHOT_SETTLE_DELAY_MS = 120;
 const SNAPSHOT_MAX_PENDING = 2;
 
 /**
@@ -25,8 +25,10 @@ export class CodeScrimBrowserCapture extends Disposable {
 	private readonly snapshotLimiter = new Limiter<void>(SNAPSHOT_MAX_PENDING);
 	private readonly events: ICodeScrimBrowserSnapshot[] = [];
 	private readonly visibility: ICodeScrimBrowserVisibility[] = [];
+	private readonly scrolls: ICodeScrimBrowserScroll[] = [];
 	private readonly visiblePages = new Map<string, boolean>();
 	private readonly lastSnapshotHash = new Map<string, number>();
+	private readonly lastScroll = new Map<string, { readonly left: number; readonly top: number }>();
 	private position: (() => number) | undefined;
 	private active = false;
 	private generation = 0;
@@ -68,7 +70,7 @@ export class CodeScrimBrowserCapture extends Disposable {
 			await this.captureAllSnapshots(position);
 		}
 		this.active = false;
-		if (!this.events.length && !this.visibility.length) {
+		if (!this.events.length && !this.visibility.length && !this.scrolls.length) {
 			this.reset();
 			return undefined;
 		}
@@ -76,6 +78,7 @@ export class CodeScrimBrowserCapture extends Disposable {
 		const track: ICodeScrimBrowserTrack = Object.freeze({
 			snapshots: Object.freeze([...this.events].sort((left, right) => left.timestamp - right.timestamp)),
 			visibility: Object.freeze([...this.visibility].sort((left, right) => left.timestamp - right.timestamp)),
+			scrolls: Object.freeze([...this.scrolls].sort((left, right) => left.timestamp - right.timestamp)),
 		});
 		this.reset();
 		return track;
@@ -92,8 +95,10 @@ export class CodeScrimBrowserCapture extends Disposable {
 		this.pageListeners.clearAndDisposeAll();
 		this.events.length = 0;
 		this.visibility.length = 0;
+		this.scrolls.length = 0;
 		this.visiblePages.clear();
 		this.lastSnapshotHash.clear();
+		this.lastScroll.clear();
 	}
 
 	private attachKnownPages(): void {
@@ -138,6 +143,7 @@ export class CodeScrimBrowserCapture extends Disposable {
 				}
 			}));
 			listeners.add(model.onDidChangeContent(() => this.captureSnapshot(model, snapshotDelayer)));
+			listeners.add(model.onDidScroll(event => this.recordScroll(model.id, event.scrollX, event.scrollY)));
 			listeners.add(model.onDidChangeLoadingState(() => {
 				if (!model.loading && model.visible && this.active) {
 					this.captureSnapshot(model, snapshotDelayer);
@@ -181,7 +187,8 @@ export class CodeScrimBrowserCapture extends Disposable {
 				return;
 			}
 			const scrollTop = Math.max(0, Math.round(snapshot.scrollY));
-			const dataHash = hash(`${snapshot.url}\0${snapshot.title}\0${scrollTop}\0${snapshot.html}`);
+			this.recordScroll(model.id, 0, snapshot.scrollY, timestamp);
+			const dataHash = hash(`${snapshot.url}\0${snapshot.title}\0${snapshot.html}`);
 			if (this.lastSnapshotHash.get(model.id) === dataHash) {
 				return;
 			}
@@ -197,6 +204,25 @@ export class CodeScrimBrowserCapture extends Disposable {
 		} catch (error) {
 			this.logService.warn('[CodeScrim] Could not capture an Integrated Browser DOM snapshot.', error);
 		}
+	}
+
+	private recordScroll(pageId: string, scrollLeft: number, scrollTop: number, timestamp = this.position?.() ?? 0): void {
+		if (!this.active) {
+			return;
+		}
+		const left = Math.round(scrollLeft);
+		const top = Math.max(0, Math.round(scrollTop));
+		const previous = this.lastScroll.get(pageId);
+		if (previous?.left === left && previous.top === top) {
+			return;
+		}
+		this.lastScroll.set(pageId, { left, top });
+		this.scrolls.push(Object.freeze({
+			timestamp: Math.max(0, Math.round(timestamp)),
+			pageId,
+			scrollLeft: left,
+			scrollTop: top,
+		}));
 	}
 
 	private recordVisibility(model: IBrowserViewModel, visible = model.visible, timestamp = this.position?.() ?? 0): void {
