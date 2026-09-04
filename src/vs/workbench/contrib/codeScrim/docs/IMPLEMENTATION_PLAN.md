@@ -108,6 +108,34 @@ Current vertical-slice note: record, stop, recovery across restart, encrypted sa
 - Connect My Preview to explicitly started learner execution, with detected ports and provider capabilities determining how local addresses are exposed.
 - Integrate native DevTools.
 
+Browser capture coverage is intentionally split into explicit tracks so adding
+fidelity does not turn DOM serialization into one unbounded event stream:
+
+- **Document lifecycle:** tab open/close/activate, committed navigation,
+  redirects, title, loading start/finish, same-document history changes, and
+  bounded post-load hydration checkpoints.
+- **Teaching focus:** editor/browser focus and the active recorded browser tab.
+- **Interactive DOM state:** DOM mutations, forms, focus, hover/pressed state,
+  details elements, nested scroll offsets, root scrolling, selection, and
+  viewport geometry.
+- **Browser chrome:** address/title state, popup and target-blank relationships,
+  dialogs, permissions, downloads, and failure/loading presentation.
+- **Runtime evidence:** console entries and request/response metadata. Passive
+  replay records this evidence but never repeats a request or executes a script.
+- **Visual fallbacks:** canvas, WebGL, video frames, closed shadow roots, and
+  cross-origin frame regions require bounded visual state when safe DOM capture
+  is impossible. This is a fallback for opaque regions, not a whole-page video.
+- **Packaged resources:** CSS, fonts, images, and other presentation assets need
+  a content-addressed resource track when they cannot be read through the page's
+  same-origin DOM. Replay must not depend on the learner being online.
+
+Current implementation covers the first two tracks, root/nested scrolling, and
+the listed interactive DOM state. It captures background-tab mutations and
+several settled states after loading so hydrated external pages do not freeze at
+their first paint. The remaining browser-chrome, runtime-evidence, opaque-region,
+and packaged-resource work stays explicit above rather than being implied by a
+generic “browser snapshot” claim.
+
 Acceptance criteria:
 
 - A local development server remains live while the lesson is paused.

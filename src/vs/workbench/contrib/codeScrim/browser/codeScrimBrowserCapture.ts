@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Limiter, ThrottledDelayer } from '../../../../base/common/async.js';
+import { disposableTimeout, Limiter, ThrottledDelayer } from '../../../../base/common/async.js';
 import { addDisposableListener } from '../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 import { hash } from '../../../../base/common/hash.js';
@@ -13,7 +13,8 @@ import { IBrowserViewModel } from '../../browserView/common/browserView.js';
 import { ICodeScrimBrowserPageEvent, ICodeScrimBrowserScroll, ICodeScrimBrowserSnapshot, ICodeScrimBrowserSurfaceEvent, ICodeScrimBrowserTrack, ICodeScrimBrowserVisibility } from '../common/codeScrimBrowser.js';
 import { ICodeScrimBrowserWindowService } from './codeScrimBrowserWindowService.js';
 
-const SNAPSHOT_SETTLE_DELAY_MS = 120;
+const SNAPSHOT_SETTLE_DELAY_MS = 250;
+const POST_LOAD_CAPTURE_DELAYS_MS = [750, 2000] as const;
 const SNAPSHOT_MAX_PENDING = 2;
 
 /**
@@ -137,6 +138,7 @@ export class CodeScrimBrowserCapture extends Disposable {
 		}
 		const listeners = new DisposableStore();
 		const snapshotDelayer = listeners.add(new ThrottledDelayer<void>(SNAPSHOT_SETTLE_DELAY_MS));
+		const settledCaptures = listeners.add(new DisposableStore());
 		this.pageListeners.set(model.id, listeners);
 		this.recordVisibility(model);
 		if (model.visible && this.active) {
@@ -149,35 +151,55 @@ export class CodeScrimBrowserCapture extends Disposable {
 				this.captureSnapshot(model, snapshotDelayer);
 			}
 		}));
-			listeners.add(model.onDidChangeFocus(() => {
-				if (model.focused) {
-					this.recordVisibility(model, true);
-					this.recordPage('activated', model.id);
-					this.recordSurface('browser', model.id);
-				}
-			}));
-			listeners.add(model.onDidNavigate(() => {
+		listeners.add(model.onDidChangeFocus(() => {
+			if (model.focused) {
+				this.recordVisibility(model, true);
+				this.recordPage('activated', model.id);
+				this.recordSurface('browser', model.id);
+			}
+		}));
+		listeners.add(model.onDidNavigate(() => {
+			this.recordPage('updated', model.id, undefined, model);
+			// Full navigations are captured after loading. Same-document and SPA
+			// navigations do not necessarily enter a loading state, so retain their
+			// URL and settled DOM as timeline state too.
+			if (!model.loading && this.active) {
+				this.scheduleSettledCaptures(model, snapshotDelayer, settledCaptures);
+			}
+		}));
+		listeners.add(model.onDidChangeTitle(() => this.recordPage('updated', model.id, undefined, model)));
+		// Background tabs can continue hydrating after the instructor switches
+		// away. Their mutations still belong to the recording and must not be
+		// discarded merely because another tab currently has focus.
+		listeners.add(model.onDidChangeContent(() => this.captureSnapshot(model, snapshotDelayer, true)));
+		listeners.add(model.onDidScroll(event => this.recordScroll(model.id, event.scrollX, event.scrollY)));
+		listeners.add(model.onDidChangeLoadingState(() => {
+			if (model.loading) {
+				settledCaptures.clear();
+				return;
+			}
+			if (this.active) {
 				this.recordPage('updated', model.id, undefined, model);
-				// Full navigations are captured after loading. Same-document and SPA
-				// navigations do not necessarily enter a loading state, so retain their
-				// URL and current DOM as a timeline state too.
-				if (!model.loading && this.active) {
-					this.captureSnapshot(model, snapshotDelayer, true);
-				}
-			}));
-			listeners.add(model.onDidChangeTitle(() => this.recordPage('updated', model.id, undefined, model)));
-			listeners.add(model.onDidChangeContent(() => this.captureSnapshot(model, snapshotDelayer)));
-			listeners.add(model.onDidScroll(event => this.recordScroll(model.id, event.scrollX, event.scrollY)));
-			listeners.add(model.onDidChangeLoadingState(() => {
-				if (!model.loading && this.active) {
-					this.recordPage('updated', model.id, undefined, model);
-					this.captureSnapshot(model, snapshotDelayer, true);
-				}
-			}));
-			listeners.add(model.onDidClose(() => {
-				this.recordVisibility(model, false);
-				this.pageListeners.deleteAndDispose(model.id);
-			}));
+				this.scheduleSettledCaptures(model, snapshotDelayer, settledCaptures);
+			}
+		}));
+		listeners.add(model.onDidClose(() => {
+			this.recordVisibility(model, false);
+			this.pageListeners.deleteAndDispose(model.id);
+		}));
+	}
+
+	/**
+	 * Captures the committed document and two bounded post-load states. Modern
+	 * pages often hydrate after `did-finish-load`; the later captures preserve
+	 * that settled content without turning every mutation into a full snapshot.
+	 */
+	private scheduleSettledCaptures(model: IBrowserViewModel, delayer: ThrottledDelayer<void>, settledCaptures: DisposableStore): void {
+		settledCaptures.clear();
+		this.captureSnapshot(model, delayer, true);
+		for (const delay of POST_LOAD_CAPTURE_DELAYS_MS) {
+			disposableTimeout(() => this.captureSnapshot(model, delayer, true), delay, settledCaptures);
+		}
 	}
 
 	/**

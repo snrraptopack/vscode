@@ -191,6 +191,29 @@ export function findCodeScrimBrowserScroll(track: ICodeScrimBrowserTrack | undef
 	return undefined;
 }
 
+/**
+ * Resolves a useful timeline position for a recorded tab, URL, or title. The
+ * first snapshot of a newly opened browser tab is commonly `about:blank`, so
+ * navigation deliberately prefers its latest non-blank state at or before the
+ * current lesson position.
+ */
+export function findCodeScrimBrowserPagePosition(track: ICodeScrimBrowserTrack | undefined, query: string, position: number): number | undefined {
+	const needle = query.trim().toLocaleLowerCase();
+	if (!track || !needle) {
+		return undefined;
+	}
+	const exact = track.snapshots.filter(snapshot => snapshot.pageId.toLocaleLowerCase() === needle || snapshot.url.toLocaleLowerCase() === needle || snapshot.title.toLocaleLowerCase() === needle);
+	const candidates = exact.length ? exact : track.snapshots.filter(snapshot => snapshot.url.toLocaleLowerCase().includes(needle) || snapshot.title.toLocaleLowerCase().includes(needle));
+	if (!candidates.length) {
+		return undefined;
+	}
+
+	const before = candidates.filter(snapshot => snapshot.timestamp <= position);
+	const usefulBefore = before.filter(snapshot => snapshot.url !== 'about:blank');
+	const useful = candidates.filter(snapshot => snapshot.url !== 'about:blank');
+	return usefulBefore.at(-1)?.timestamp ?? useful.at(0)?.timestamp ?? before.at(-1)?.timestamp ?? candidates.at(0)?.timestamp;
+}
+
 function findLastTimestamp(entries: readonly { readonly timestamp: number }[], position: number): number {
 	let low = 0;
 	let high = entries.length - 1;

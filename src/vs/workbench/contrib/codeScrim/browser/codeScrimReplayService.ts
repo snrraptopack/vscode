@@ -19,7 +19,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
-import { findCodeScrimActiveSurface, findCodeScrimBrowserPages, findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
+import { findCodeScrimActiveSurface, findCodeScrimBrowserPagePosition, findCodeScrimBrowserPages, findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
@@ -137,17 +137,13 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	}
 
 	async openRecordedBrowserPage(query: string): Promise<boolean> {
-		const snapshots = this.activeDraft?.browser?.snapshots;
-		const needle = query.trim().toLocaleLowerCase();
-		if (!snapshots?.length || !needle) {
+		const browser = this.activeDraft?.browser;
+		const position = this._state.status === 'idle' ? 0 : this._state.position;
+		const match = findCodeScrimBrowserPagePosition(browser, query, position);
+		if (match === undefined) {
 			return false;
 		}
-		const exact = snapshots.find(snapshot => snapshot.pageId.toLocaleLowerCase() === needle || snapshot.url.toLocaleLowerCase() === needle || snapshot.title.toLocaleLowerCase() === needle);
-		const match = exact ?? snapshots.find(snapshot => snapshot.url.toLocaleLowerCase().includes(needle) || snapshot.title.toLocaleLowerCase().includes(needle));
-		if (!match) {
-			return false;
-		}
-		await this.seek(match.timestamp);
+		await this.seek(match);
 		return true;
 	}
 

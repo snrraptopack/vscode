@@ -19,6 +19,7 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 	private title: HTMLElement | undefined;
 	private address: HTMLInputElement | undefined;
 	private snapshot: ICodeScrimBrowserSnapshot | undefined;
+	private readonly snapshotsByPageId = new Map<string, ICodeScrimBrowserSnapshot>();
 	private renderedSnapshot: ICodeScrimBrowserSnapshot | undefined;
 	private scrollTop = 0;
 	private pages: readonly ICodeScrimBrowserPageState[] = [];
@@ -45,10 +46,14 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 	show(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop = snapshot?.scrollTop ?? 0, pages: readonly ICodeScrimBrowserPageState[] = [], activeSurface?: ICodeScrimBrowserSurfaceEvent): void {
 		const wasActive = this.browserActive;
 		this.snapshot = snapshot;
+		if (snapshot) {
+			this.snapshotsByPageId.set(snapshot.pageId, snapshot);
+		}
 		this.scrollTop = scrollTop;
 		this.pages = pages;
 		this.browserActive = activeSurface ? activeSurface.surface === 'browser' : snapshot !== undefined;
 		if (!snapshot) {
+			this.snapshotsByPageId.clear();
 			this.close(false);
 			return;
 		}
@@ -191,10 +196,22 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 			const tab = mainWindow.document.createElement('button');
 			tab.type = 'button';
 			tab.className = 'codescrim-browser-window-tab';
-			tab.classList.toggle('active', page.active || page.pageId === this.snapshot?.pageId);
+			tab.classList.toggle('active', page.pageId === this.snapshot?.pageId);
 			tab.textContent = page.title || page.url;
 			tab.title = page.url;
-			tab.addEventListener('click', () => void this.openRecordedPage(page.pageId));
+			tab.addEventListener('click', () => {
+				const snapshot = this.snapshotsByPageId.get(page.pageId);
+				if (snapshot && (snapshot.url !== 'about:blank' || page.url === 'about:blank')) {
+					// Previously visited replay tabs already have a passive DOM state in
+					// memory. Switch locally instead of seeking back to the tab's initial
+					// about:blank navigation on the lesson timeline.
+					this.snapshot = snapshot;
+					this.scrollTop = snapshot.scrollTop;
+					this.render();
+					return;
+				}
+				void this.openRecordedPage(page.pageId);
+			});
 			tabs.appendChild(tab);
 		}
 	}

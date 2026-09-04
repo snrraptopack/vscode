@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { findCodeScrimActiveSurface, findCodeScrimBrowserPages, findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot, findCodeScrimVisiblePage, ICodeScrimBrowserTrack } from '../../common/codeScrimBrowser.js';
+import { findCodeScrimActiveSurface, findCodeScrimBrowserPagePosition, findCodeScrimBrowserPages, findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot, findCodeScrimVisiblePage, ICodeScrimBrowserTrack } from '../../common/codeScrimBrowser.js';
 
 suite('CodeScrimBrowser', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -101,5 +101,25 @@ suite('CodeScrimBrowser', () => {
 		assert.strictEqual(findCodeScrimBrowserScroll(track, 200, 'one')?.scrollTop, 20);
 		assert.strictEqual(findCodeScrimBrowserScroll(track, 350, 'one')?.scrollTop, 220);
 		assert.strictEqual(findCodeScrimBrowserScroll(track, 600, 'two')?.scrollTop, 80);
+	});
+
+	test('opens a recorded tab at useful content instead of its initial blank page', () => {
+		const tabs: ICodeScrimBrowserTrack = {
+			snapshots: [
+				{ timestamp: 100, pageId: 'external', url: 'about:blank', title: '', scrollTop: 0, html: '<html></html>' },
+				{ timestamp: 300, pageId: 'external', url: 'https://example.com/docs', title: 'Docs', scrollTop: 0, html: '<html>docs-a</html>' },
+				{ timestamp: 500, pageId: 'external', url: 'https://example.com/docs', title: 'Docs', scrollTop: 200, html: '<html>docs-b</html>' },
+			],
+			visibility: [],
+			scrolls: [],
+			pages: [],
+			surfaces: [],
+		};
+
+		assert.deepStrictEqual([
+			findCodeScrimBrowserPagePosition(tabs, 'external', 200),
+			findCodeScrimBrowserPagePosition(tabs, 'external', 600),
+			findCodeScrimBrowserPagePosition(tabs, 'example.com', 600),
+		], [300, 500, 500]);
 	});
 });
