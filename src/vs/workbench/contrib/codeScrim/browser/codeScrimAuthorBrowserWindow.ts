@@ -11,7 +11,7 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableMap, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize } from '../../../../nls.js';
-import { IBrowserViewOpenOptions } from '../../../../platform/browserView/common/browserView.js';
+import { IBrowserViewEditorOpenOptions } from '../../../../platform/browserView/common/browserView.js';
 import { IAuxiliaryWindow, IAuxiliaryWindowService } from '../../../services/auxiliaryWindow/browser/auxiliaryWindowService.js';
 import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
 import { IBrowserViewModel } from '../../browserView/common/browserView.js';
@@ -78,7 +78,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 	}
 
 	/** Claims a popup whose opener is already hosted by this CodeScrim window. */
-	acceptCreatedPage(input: BrowserEditorInput, openOptions: IBrowserViewOpenOptions): boolean {
+	acceptCreatedPage(input: BrowserEditorInput, openOptions: IBrowserViewEditorOpenOptions): boolean {
 		if (!openOptions.parentViewId || !this.pages.has(openOptions.parentViewId)) {
 			return false;
 		}
