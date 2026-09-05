@@ -1,5 +1,10 @@
 # Implementation Plan
 
+Manual defects that must be reproduced before more UI work are tracked in
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md). The separate WebM-first, invisible-overlay
+prototype is scoped in [VIDEO_EXPERIMENT.md](VIDEO_EXPERIMENT.md) and is not part
+of the production milestones below.
+
 ## Delivery method
 
 Each milestone is an end-to-end native slice with acceptance criteria and targeted tests. A milestone is not complete merely because UI exists; state transitions and cleanup must work.
