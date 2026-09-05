@@ -21,7 +21,7 @@ import { IEditorService } from '../../../services/editor/common/editorService.js
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
 import { findCodeScrimActiveSurface, findCodeScrimBrowserPagePosition, findCodeScrimBrowserPages, findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
-import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
+import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, CodeScrimReplayState, collectCodeScrimTerminalCommands, findCodeScrimCheckpoint, findCodeScrimTeachingSurface, ICodeScrimLearnerExperiment, ICodeScrimLearnerState, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalState } from '../common/codeScrimTerminal.js';
 import { CodeScrimNarrationPlayback } from './codeScrimNarrationPlayback.js';
 import { CodeScrimReplayPreview } from './codeScrimReplayPreview.js';
@@ -425,6 +425,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			this.activeDraft ? findCodeScrimBrowserScroll(this.activeDraft.browser, position, snapshot?.pageId)?.scrollTop : undefined,
 			this.activeDraft ? findCodeScrimBrowserPages(this.activeDraft.browser, position) : undefined,
 			this.activeDraft ? findCodeScrimActiveSurface(this.activeDraft.browser, position) : undefined,
+			this.activeDraft ? findCodeScrimTeachingSurface(this.activeDraft, position) : undefined,
 		);
 		return toDisposable(() => {
 			if (this.surface === surface) {
@@ -838,10 +839,12 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			}
 			case 'editor.documentSaved': {
 				// A recorded save updates only the CodeScrim-owned learner projection. It never writes
-				// to the instructor workspace and never executes a task or command.
+				// to the instructor workspace and never executes a task or command. Persistence is
+				// deliberately not awaited by the replay clock: filesystem notifications from a
+				// recorded save must not stall the lesson at this event's timestamp.
 				const instructorModel = this.getInstructorModelInternal(event.payload.resource);
 				if (instructorModel) {
-					await this.learnerWorkspaceService.writeText(event.payload.resource, instructorModel.getValue());
+					void this.learnerWorkspaceService.writeText(event.payload.resource, instructorModel.getValue()).catch(onUnexpectedError);
 				}
 				break;
 			}
@@ -1206,6 +1209,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			findCodeScrimBrowserScroll(this.activeDraft.browser, position, browserSnapshot?.pageId)?.scrollTop,
 			findCodeScrimBrowserPages(this.activeDraft.browser, position),
 			findCodeScrimActiveSurface(this.activeDraft.browser, position),
+			findCodeScrimTeachingSurface(this.activeDraft, position),
 		);
 		this._onDidChangeState.fire(this._state);
 	}

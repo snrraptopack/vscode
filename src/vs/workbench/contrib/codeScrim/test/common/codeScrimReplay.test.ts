@@ -5,8 +5,8 @@
 
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { CodeScrimEditorEvent } from '../../common/codeScrimRecording.js';
-import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, findCodeScrimCheckpoint } from '../../common/codeScrimReplay.js';
+import { CodeScrimEditorEvent, ICodeScrimRecordingDraft } from '../../common/codeScrimRecording.js';
+import { CodeScrimLearnerOverlayStore, CodeScrimReplayCursor, findCodeScrimCheckpoint, findCodeScrimTeachingSurface } from '../../common/codeScrimReplay.js';
 
 suite('CodeScrimReplayCursor', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -76,6 +76,30 @@ suite('CodeScrimReplayCursor', () => {
 		assert.strictEqual(cursor.advanceOne(100), events[1]);
 		assert.strictEqual(cursor.advanceOne(100), undefined);
 		assert.strictEqual(cursor.advanceOne(200), events[2]);
+	});
+});
+
+suite('CodeScrim teaching surface', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('uses the latest instructor browser, terminal, or editor activity', () => {
+		const editorEvent = (sequence: number, timestamp: number): CodeScrimEditorEvent => ({
+			id: `surface:${sequence}`, version: 1, timestamp, sequence, domain: 'editor', kind: 'editor.activeResourceChanged', payload: {},
+		});
+		const draft: ICodeScrimRecordingDraft = {
+			id: 'surface-draft', duration: 400,
+			checkpoints: [{ timestamp: 0, eventIndex: 0, documents: [], entries: [], skippedEntryCount: 0, terminals: [] }],
+			events: [
+				editorEvent(0, 100),
+				{ id: 'surface:1', version: 1, timestamp: 200, sequence: 1, domain: 'terminal', kind: 'terminal.activeChanged', payload: { terminalId: 1 } },
+				editorEvent(2, 300),
+			],
+			browser: { snapshots: [], visibility: [], scrolls: [], pages: [], surfaces: [
+				{ timestamp: 250, surface: 'browser', pageId: 'page' }, { timestamp: 350, surface: 'workbench' },
+			] },
+		};
+		assert.deepStrictEqual([220, 270, 320, 360].map(position => findCodeScrimTeachingSurface(draft, position)),
+			['terminal', 'browser', 'workbench', 'workbench']);
 	});
 });
 

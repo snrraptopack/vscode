@@ -13,9 +13,11 @@ import { IBrowserViewModel } from '../../browserView/common/browserView.js';
 import { ICodeScrimBrowserPageEvent, ICodeScrimBrowserScroll, ICodeScrimBrowserSnapshot, ICodeScrimBrowserSurfaceEvent, ICodeScrimBrowserTrack, ICodeScrimBrowserVisibility } from '../common/codeScrimBrowser.js';
 import { ICodeScrimBrowserWindowService } from './codeScrimBrowserWindowService.js';
 
-const SNAPSHOT_SETTLE_DELAY_MS = 250;
+const SNAPSHOT_SETTLE_DELAY_MS = 500;
 const POST_LOAD_CAPTURE_DELAYS_MS = [750, 2000] as const;
-const SNAPSHOT_MAX_PENDING = 2;
+const SNAPSHOT_MAX_PENDING = 1;
+const SNAPSHOT_MIN_INTERVAL_MS = 1000;
+const SNAPSHOT_MAX_HTML_LENGTH = 16 * 1024 * 1024;
 
 /**
  * Records the instructor Integrated Browser as serialized DOM states plus page
@@ -34,6 +36,7 @@ export class CodeScrimBrowserCapture extends Disposable {
 	private readonly visiblePages = new Map<string, boolean>();
 	private readonly lastSnapshotHash = new Map<string, number>();
 	private readonly lastScroll = new Map<string, { readonly left: number; readonly top: number }>();
+	private readonly lastSnapshotRequestedAt = new Map<string, number>();
 	private position: (() => number) | undefined;
 	private active = false;
 	private generation = 0;
@@ -124,6 +127,7 @@ export class CodeScrimBrowserCapture extends Disposable {
 		this.visiblePages.clear();
 		this.lastSnapshotHash.clear();
 		this.lastScroll.clear();
+		this.lastSnapshotRequestedAt.clear();
 	}
 
 	private attachKnownPages(): void {
@@ -168,10 +172,10 @@ export class CodeScrimBrowserCapture extends Disposable {
 			}
 		}));
 		listeners.add(model.onDidChangeTitle(() => this.recordPage('updated', model.id, undefined, model)));
-		// Background tabs can continue hydrating after the instructor switches
-		// away. Their mutations still belong to the recording and must not be
-		// discarded merely because another tab currently has focus.
-		listeners.add(model.onDidChangeContent(() => this.captureSnapshot(model, snapshotDelayer, true)));
+		// Hidden pages must not keep expensive capture work alive while the
+		// instructor is teaching elsewhere. Activating a page captures its latest
+		// state through the visibility listener above.
+		listeners.add(model.onDidChangeContent(() => this.captureSnapshot(model, snapshotDelayer)));
 		listeners.add(model.onDidScroll(event => this.recordScroll(model.id, event.scrollX, event.scrollY)));
 		listeners.add(model.onDidChangeLoadingState(() => {
 			if (model.loading) {
@@ -196,9 +200,9 @@ export class CodeScrimBrowserCapture extends Disposable {
 	 */
 	private scheduleSettledCaptures(model: IBrowserViewModel, delayer: ThrottledDelayer<void>, settledCaptures: DisposableStore): void {
 		settledCaptures.clear();
-		this.captureSnapshot(model, delayer, true);
+		this.captureSnapshot(model, delayer);
 		for (const delay of POST_LOAD_CAPTURE_DELAYS_MS) {
-			disposableTimeout(() => this.captureSnapshot(model, delayer, true), delay, settledCaptures);
+			disposableTimeout(() => this.captureSnapshot(model, delayer), delay, settledCaptures);
 		}
 	}
 
@@ -209,17 +213,24 @@ export class CodeScrimBrowserCapture extends Disposable {
 	private async captureAllSnapshots(timestamp: number): Promise<void> {
 		const captures: Promise<void>[] = [];
 		for (const model of this.browserWindowService.authorPageModels) {
-			captures.push(this.snapshotLimiter.queue(() => this.captureSnapshotNow(model, undefined, timestamp)));
+			if (model.visible) {
+				captures.push(this.snapshotLimiter.queue(() => this.captureSnapshotNow(model, undefined, timestamp)));
+			}
 		}
 		await Promise.all(captures);
 	}
 
-	private captureSnapshot(model: IBrowserViewModel, delayer: ThrottledDelayer<void>, includeBackground = false): void {
-		if (!this.active || (!includeBackground && !model.visible)) {
+	private captureSnapshot(model: IBrowserViewModel, delayer: ThrottledDelayer<void>): void {
+		if (!this.active || !model.visible) {
 			return;
 		}
+		const now = this.position?.() ?? 0;
+		if (now - (this.lastSnapshotRequestedAt.get(model.id) ?? Number.NEGATIVE_INFINITY) < SNAPSHOT_MIN_INTERVAL_MS * 1000) {
+			return;
+		}
+		this.lastSnapshotRequestedAt.set(model.id, now);
 		const generation = this.generation;
-		const timestamp = Math.max(0, Math.round(this.position?.() ?? 0));
+		const timestamp = Math.max(0, Math.round(now));
 		void delayer.trigger(() => this.snapshotLimiter.queue(() => this.captureSnapshotNow(model, generation, timestamp)))
 			.catch(() => { /* The page or recording was disposed before the trailing capture. */ });
 	}
@@ -228,6 +239,10 @@ export class CodeScrimBrowserCapture extends Disposable {
 		try {
 			const snapshot = await model.captureDomSnapshot();
 			if (!snapshot || (generation !== undefined && generation !== this.generation)) {
+				return;
+			}
+			if (snapshot.html.length > SNAPSHOT_MAX_HTML_LENGTH) {
+				this.logService.warn(`[CodeScrim] Skipped an oversized browser DOM snapshot (${snapshot.html.length} characters).`);
 				return;
 			}
 			const scrollTop = Math.max(0, Math.round(snapshot.scrollY));

@@ -19,11 +19,14 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 	private panel: HTMLElement | undefined;
 	private frame: HTMLIFrameElement | undefined;
 	private address: HTMLInputElement | undefined;
-	private pagesSelect: HTMLSelectElement | undefined;
+	private tabs: HTMLElement | undefined;
+	private readonly tabDisposables = this._register(new MutableDisposable<DisposableStore>());
 	private expandButton: HTMLButtonElement | undefined;
 	private emptyState: HTMLElement | undefined;
 	private snapshot: ICodeScrimBrowserSnapshot | undefined;
 	private pages: readonly ICodeScrimBrowserPageState[] = [];
+	private selectedPageId: string | undefined;
+	private instructorPageId: string | undefined;
 	private renderedSnapshot: ICodeScrimBrowserSnapshot | undefined;
 	private scrollTop = 0;
 	private renderedScrollTop = -1;
@@ -54,11 +57,8 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 		const header = DOM.append(panel, DOM.$('header.codescrim-learner-browser-header', { tabindex: '0',
 			'aria-label': localize('codeScrim.moveBrowser', "Move Browser. Drag or use arrow keys.") }));
 		DOM.append(header, DOM.$('span.codescrim-learner-browser-title', undefined, localize('codeScrim.browserLabel', "Browser")));
-		this.pagesSelect = DOM.append(header, DOM.$('select.codescrim-learner-browser-tabs', {
+		this.tabs = DOM.append(header, DOM.$('nav.codescrim-learner-browser-tabs', {
 			'aria-label': localize('codeScrim.recordedTabs', "Recorded tabs"),
-		}));
-		store.add(DOM.addDisposableListener(this.pagesSelect, DOM.EventType.CHANGE, () => {
-			void this.navigationHandler?.(this.pagesSelect?.value ?? '');
 		}));
 		this.expandButton = this.addButton(header, localize('codeScrim.expandBrowser', "Expand"), () => {
 			this.expanded = !this.expanded;
@@ -68,6 +68,14 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 			this.suppressed = true;
 			panel.hidden = true;
 		}, store);
+		store.add(DOM.addDisposableListener(panel, DOM.EventType.KEY_DOWN, (event: KeyboardEvent) => {
+			if (event.key === 'Escape' && this.expanded) {
+				this.expanded = false;
+				this.layout();
+				event.preventDefault();
+				event.stopPropagation();
+			}
+		}));
 		const toolbar = DOM.append(panel, DOM.$('div.codescrim-learner-browser-toolbar'));
 		this.address = DOM.append(toolbar, DOM.$('input.codescrim-browser-window-address', {
 			type: 'text', readonly: 'true', 'aria-label': localize('codeScrim.recordedAddress', "Recorded page address"),
@@ -100,9 +108,12 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 				this.panel = undefined;
 				this.frame = undefined;
 				this.address = undefined;
-				this.pagesSelect = undefined;
+				this.tabs = undefined;
+				this.tabDisposables.clear();
 				this.expandButton = undefined;
 				this.emptyState = undefined;
+				this.selectedPageId = undefined;
+				this.instructorPageId = undefined;
 				this.explicitlyOpened = false;
 				this.suppressed = false;
 			}
@@ -118,7 +129,7 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 	private bindBoundsControl(control: HTMLElement, resize: boolean, store: DisposableStore): void {
 		let drag: { x: number; y: number; bounds: IBrowserBounds } | undefined;
 		store.add(DOM.addDisposableListener(control, DOM.EventType.POINTER_DOWN, (event: PointerEvent) => {
-			if (event.button !== 0 || this.expanded || (!resize && (event.target as HTMLElement).closest('button, input, select'))) {
+			if (event.button !== 0 || this.expanded || (!resize && (event.target as HTMLElement).closest('button, input, nav'))) {
 				return;
 			}
 			event.preventDefault();
@@ -181,7 +192,7 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 		this.bounds.height = Math.min(availableHeight, Math.max(220, this.bounds.height));
 		this.bounds.x = Math.max(16, Math.min(this.bounds.x, this.host.clientWidth - this.bounds.width - 16));
 		this.bounds.y = Math.max(topInset, Math.min(this.bounds.y, this.host.clientHeight - this.bounds.height - 16));
-		const bounds = this.expanded ? { x: 16, y: topInset, width: availableWidth, height: availableHeight } : this.bounds;
+		const bounds = this.expanded ? { x: 0, y: 0, width: this.host.clientWidth, height: this.host.clientHeight } : this.bounds;
 		Object.assign(this.panel.style, { left: bounds.x + 'px', top: bounds.y + 'px', width: bounds.width + 'px', height: bounds.height + 'px' });
 		this.panel.classList.toggle('expanded', this.expanded);
 		if (this.expandButton) {
@@ -201,6 +212,10 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 	}
 
 	show(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop = snapshot?.scrollTop ?? 0, pages: readonly ICodeScrimBrowserPageState[] = [], _activeSurface?: ICodeScrimBrowserSurfaceEvent): void {
+		if (this.instructorPageId !== snapshot?.pageId) {
+			this.instructorPageId = snapshot?.pageId;
+			this.selectedPageId = undefined;
+		}
 		this.snapshot = snapshot;
 		this.scrollTop = scrollTop;
 		this.pages = pages;
@@ -225,41 +240,63 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 			return;
 		}
 		this.layout();
+		const selectedPage = this.selectedPageId ? this.pages.find(page => page.pageId === this.selectedPageId) : undefined;
+		const renderedSnapshot = selectedPage?.snapshot ?? (selectedPage ? undefined : this.snapshot);
+		const renderedScrollTop = selectedPage?.scrollTop ?? this.scrollTop;
 		if (this.address) {
 			// Navigation metadata can arrive before the next serialized DOM snapshot.
-			const page = this.pages.find(page => page.pageId === this.snapshot?.pageId);
-			this.address.value = page?.url ?? this.snapshot?.url ?? '';
+			const page = selectedPage ?? this.pages.find(page => page.pageId === renderedSnapshot?.pageId);
+			this.address.value = page?.url ?? renderedSnapshot?.url ?? '';
 			this.address.placeholder = localize('codeScrim.recordedBrowserAddress', "Recorded browser");
 		}
-		this.frame.hidden = !this.snapshot;
+		this.frame.hidden = !renderedSnapshot;
 		if (this.emptyState) {
-			this.emptyState.hidden = !!this.snapshot;
+			this.emptyState.hidden = !!renderedSnapshot;
 		}
-		if (this.pagesSelect) {
-			this.pagesSelect.hidden = this.pages.length < 2;
-			const signature = JSON.stringify(this.pages.map(page => [page.pageId, page.title, page.url]));
-			if (this.pagesSelect.dataset.pages !== signature) {
-				this.pagesSelect.dataset.pages = signature;
-				DOM.clearNode(this.pagesSelect);
-				for (const page of this.pages) {
-					DOM.append(this.pagesSelect, DOM.$('option', { value: page.pageId }, page.title || page.url));
-				}
-			}
-			this.pagesSelect.value = this.snapshot?.pageId ?? '';
-		}
-		if (!this.snapshot) {
+		this.renderTabs(renderedSnapshot?.pageId);
+		if (!renderedSnapshot) {
 			return;
 		}
-		const changed = this.renderedSnapshot !== this.snapshot;
+		const changed = this.renderedSnapshot !== renderedSnapshot;
 		if (changed) {
-			if (!applyCodeScrimBrowserReplayDom(this.frame, this.snapshot.html)) {
+			if (!applyCodeScrimBrowserReplayDom(this.frame, renderedSnapshot.html)) {
 				return;
 			}
-			this.renderedSnapshot = this.snapshot;
+			this.renderedSnapshot = renderedSnapshot;
 		}
-		if (changed || this.renderedScrollTop !== this.scrollTop) {
-			this.renderedScrollTop = this.scrollTop;
-			this.frame.contentWindow?.scrollTo(0, this.scrollTop);
+		if (changed || this.renderedScrollTop !== renderedScrollTop) {
+			this.renderedScrollTop = renderedScrollTop;
+			this.frame.contentWindow?.scrollTo(0, renderedScrollTop);
+		}
+	}
+
+	private renderTabs(renderedPageId: string | undefined): void {
+		if (!this.tabs) {
+			return;
+		}
+		this.tabs.hidden = this.pages.length < 2;
+		const signature = JSON.stringify(this.pages.map(page => [page.pageId, page.title, page.url, page.active, page.snapshot?.timestamp, page.pageId === renderedPageId]));
+		if (this.tabs.dataset.pages === signature) {
+			return;
+		}
+		this.tabs.dataset.pages = signature;
+		this.tabDisposables.value = new DisposableStore();
+		DOM.clearNode(this.tabs);
+		for (const page of this.pages) {
+			const button = DOM.append(this.tabs, DOM.$<HTMLButtonElement>('button.codescrim-learner-browser-tab', {
+				type: 'button',
+				title: page.title || page.url,
+				'aria-pressed': String(page.pageId === renderedPageId),
+			}, page.title || page.url || localize('codeScrim.untitledBrowserPage', "Browser")));
+			button.classList.toggle('active', page.pageId === renderedPageId);
+			this.tabDisposables.value.add(DOM.addDisposableListener(button, DOM.EventType.CLICK, () => {
+				if (page.snapshot) {
+					this.selectedPageId = page.pageId;
+					this.render();
+				} else {
+					void this.navigationHandler?.(page.pageId);
+				}
+			}));
 		}
 	}
 }

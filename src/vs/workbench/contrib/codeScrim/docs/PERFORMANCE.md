@@ -68,7 +68,7 @@ These are engineering targets, not current guarantees:
 | Start recording, up to 2,000 included entries | Interactive recording state within 500 ms at p95; remaining baseline work may continue asynchronously |
 | Start recording, bounded large workspace | Interactive recording state within 2 s at p95 with progress and cancellation |
 | Steady editor/terminal recording | No task longer than 50 ms on the renderer-critical path |
-| Browser capture | At most one screenshot in flight per page; bounded pending writes and adaptive frame dropping |
+| Browser capture | At most one serialized DOM snapshot in flight; visible pages only, bounded snapshot size, and coalesced mutation capture |
 | Timeline seek | Restore nearest checkpoint and become interactive within 250 ms at p95 for a ten-minute lesson |
 | Memory | Growth must be bounded by configured buffers rather than lesson duration |
 | Lesson playback | No recorded command, URL, script, or page content executes as a performance shortcut |

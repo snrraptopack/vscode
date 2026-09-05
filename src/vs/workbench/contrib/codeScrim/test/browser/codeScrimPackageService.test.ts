@@ -23,6 +23,7 @@ suite('CodeScrimPackageService', () => {
 		const fileService = disposables.add(new FileService(new NullLogService()));
 		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
 		const secrets = disposables.add(new TestSecretStorageService());
+		Object.defineProperty(secrets, 'type', { value: 'persisted' });
 		const profile = toUserDataProfile('test', 'Test', URI.from({ scheme: Schemas.inMemory, path: '/profile' }), URI.from({ scheme: Schemas.inMemory, path: '/cache' }));
 		const profiles = { defaultProfile: profile } as IUserDataProfilesService;
 		const first = new CodeScrimPackageService(fileService, new NullLogService(), secrets, profiles);
@@ -49,7 +50,9 @@ suite('CodeScrimPackageService', () => {
 		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
 		const profile = toUserDataProfile('delete-test', 'Delete Test', URI.from({ scheme: Schemas.inMemory, path: '/delete-profile' }), URI.from({ scheme: Schemas.inMemory, path: '/delete-cache' }));
 		const profiles = { defaultProfile: profile } as IUserDataProfilesService;
-		const service = new CodeScrimPackageService(fileService, new NullLogService(), disposables.add(new TestSecretStorageService()), profiles);
+		const secrets = disposables.add(new TestSecretStorageService());
+		Object.defineProperty(secrets, 'type', { value: 'persisted' });
+		const service = new CodeScrimPackageService(fileService, new NullLogService(), secrets, profiles);
 		const exported = URI.from({ scheme: Schemas.inMemory, path: '/course/lesson.scrim' });
 		await service.saveDraft(createDraft());
 		await service.savePackage(exported, createDraft());
@@ -58,6 +61,52 @@ suite('CodeScrimPackageService', () => {
 
 		assert.strictEqual(await service.loadDraft(), undefined);
 		assert.strictEqual(await fileService.exists(exported), true);
+	});
+
+	test('does not claim an encrypted lesson was saved with temporary secret storage', async () => {
+		const fileService = disposables.add(new FileService(new NullLogService()));
+		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
+		const profile = toUserDataProfile('temporary-key', 'Temporary Key', URI.from({ scheme: Schemas.inMemory, path: '/temporary-profile' }), URI.from({ scheme: Schemas.inMemory, path: '/temporary-cache' }));
+		const service = new CodeScrimPackageService(fileService, new NullLogService(), disposables.add(new TestSecretStorageService()), { defaultProfile: profile } as IUserDataProfilesService);
+		const target = URI.from({ scheme: Schemas.inMemory, path: '/course/temporary.scrim' });
+
+		await assert.rejects(() => service.savePackage(target, createDraft()), /secret storage is temporary/);
+		assert.strictEqual(await fileService.exists(target), false);
+	});
+
+	test('opening without the matching key does not generate or replace a key', async () => {
+		const fileService = disposables.add(new FileService(new NullLogService()));
+		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
+		const secrets = disposables.add(new TestSecretStorageService());
+		Object.defineProperty(secrets, 'type', { value: 'persisted' });
+		const profile = toUserDataProfile('missing-key', 'Missing Key', URI.from({ scheme: Schemas.inMemory, path: '/missing-profile' }), URI.from({ scheme: Schemas.inMemory, path: '/missing-cache' }));
+		const profiles = { defaultProfile: profile } as IUserDataProfilesService;
+		const service = new CodeScrimPackageService(fileService, new NullLogService(), secrets, profiles);
+		const target = URI.from({ scheme: Schemas.inMemory, path: '/course/missing-key.scrim' });
+		await service.savePackage(target, createDraft());
+		for (const key of await secrets.keys()) {
+			await secrets.delete(key);
+		}
+
+		await assert.rejects(() => new CodeScrimPackageService(fileService, new NullLogService(), secrets, profiles).openPackage(target), /key.*not available/i);
+		assert.deepStrictEqual(await secrets.keys(), []);
+	});
+
+	test('opens a lesson by its archived key after another window changes the default key', async () => {
+		const fileService = disposables.add(new FileService(new NullLogService()));
+		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
+		const secrets = disposables.add(new TestSecretStorageService());
+		Object.defineProperty(secrets, 'type', { value: 'persisted' });
+		const profile = toUserDataProfile('archived-key', 'Archived Key', URI.from({ scheme: Schemas.inMemory, path: '/archived-profile' }), URI.from({ scheme: Schemas.inMemory, path: '/archived-cache' }));
+		const profiles = { defaultProfile: profile } as IUserDataProfilesService;
+		const service = new CodeScrimPackageService(fileService, new NullLogService(), secrets, profiles);
+		const target = URI.from({ scheme: Schemas.inMemory, path: '/course/archived-key.scrim' });
+		await service.savePackage(target, createDraft());
+
+		const replacement = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+		await secrets.set('codescrim.authoringPackageKey.v1', JSON.stringify({ id: 'replacement-key', jwk: await crypto.subtle.exportKey('jwk', replacement) }));
+
+		assert.deepStrictEqual(await new CodeScrimPackageService(fileService, new NullLogService(), secrets, profiles).openPackage(target), createDraft());
 	});
 });
 

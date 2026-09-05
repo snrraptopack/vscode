@@ -46,7 +46,7 @@ suite('CodeScrimAuthorBrowser', () => {
 			}
 		}();
 		const input = new class extends mock<BrowserEditorInput>() {
-			override readonly id = model.id;
+			override get id(): string { return model.id; }
 			override isDisposed(): boolean { return false; }
 			override async resolve(): Promise<IBrowserViewModel> { return model; }
 		}();
@@ -62,10 +62,14 @@ suite('CodeScrimAuthorBrowser', () => {
 		const service = new class extends mock<IAuxiliaryWindowService>() {
 			override async open(): Promise<IAuxiliaryWindow> { return auxiliary; }
 		}();
-		const browser = disposables.add(new CodeScrimAuthorBrowserWindow(input, service, new TestConfigurationService(), () => input));
+		const created: string[] = [];
+		const browser = disposables.add(new CodeScrimAuthorBrowserWindow(input, service, new TestConfigurationService(), url => {
+			created.push(url ?? 'about:blank');
+			return input;
+		}));
 		await browser.open();
 		await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
-		return { model, container, address: container.querySelector('input')! };
+		return { model, container, address: container.querySelector('input')!, created };
 	}
 
 	test('navigation updates a focused address unless it contains an unsubmitted edit', async () => {
@@ -79,6 +83,14 @@ suite('CodeScrimAuthorBrowser', () => {
 		assert.strictEqual(address.value, 'my unfinished search');
 		address.blur();
 		assert.strictEqual(address.value, model.url);
+	});
+
+	test('address navigation to another site opens a new browser page', async () => {
+		const { container, address, created } = await setup();
+		address.value = 'another.test/path';
+		address.dispatchEvent(new mainWindow.Event('input'));
+		container.querySelector('form')!.dispatchEvent(new mainWindow.Event('submit', { cancelable: true }));
+		assert.deepStrictEqual(created, ['another.test/path']);
 	});
 
 	test('submitting an address allows subsequent redirect updates', async () => {

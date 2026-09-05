@@ -24,6 +24,7 @@ import { getIconClasses } from '../../../../editor/common/services/getIconClasse
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IContextKey, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { IEditorOptions } from '../../../../platform/editor/common/editor.js';
 import { FileKind } from '../../../../platform/files/common/files.js';
@@ -37,7 +38,7 @@ import { IEditorOpenContext } from '../../../common/editor.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
 import { ICodeScrimBrowserPageState, ICodeScrimBrowserSnapshot, ICodeScrimBrowserSurfaceEvent } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
-import { CodeScrimReplayState, ICodeScrimLearnerExperiment, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
+import { CodeScrimInstructorBrowserActiveContext, CodeScrimInstructorTerminalActiveContext, CodeScrimReplayState, CodeScrimTeachingSurface, ICodeScrimLearnerExperiment, ICodeScrimReplayService, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimSessionService, ICodeScrimSessionState } from '../common/codeScrimSession.js';
 import { CodeScrimLessonEditorInput } from './codeScrimLessonEditorInput.js';
 import { ICodeScrimBrowserWindowService } from './codeScrimBrowserWindowService.js';
@@ -94,6 +95,8 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private readonly layoutLease = this._register(new MutableDisposable<IDisposable>());
 	private readonly replaySurfaceLease = this._register(new MutableDisposable<IDisposable>());
 	private readonly browserHostLease = this._register(new MutableDisposable<IDisposable>());
+	private readonly browserActiveContext: IContextKey<boolean>;
+	private readonly terminalActiveContext: IContextKey<boolean>;
 	private navigationMode: 'course' | 'files' = 'course';
 	private navigationModeManuallySelected = false;
 	private timelineScrubbing = false;
@@ -110,6 +113,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		@IThemeService themeService: IThemeService,
 		@IStorageService storageService: IStorageService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IContextKeyService contextKeyService: IContextKeyService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ILanguageService private readonly languageService: ILanguageService,
@@ -120,6 +124,12 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		@ICodeScrimBrowserWindowService private readonly browserWindowService: ICodeScrimBrowserWindowService,
 	) {
 		super(CodeScrimLessonEditor.ID, group, telemetryService, themeService, storageService);
+		this.browserActiveContext = CodeScrimInstructorBrowserActiveContext.bindTo(contextKeyService);
+		this.terminalActiveContext = CodeScrimInstructorTerminalActiveContext.bindTo(contextKeyService);
+		this._register({ dispose: () => {
+			this.browserActiveContext.reset();
+			this.terminalActiveContext.reset();
+		} });
 		this._register(this.sessionService.onDidChangeState(state => this.renderState(state)));
 		this._register(this.replayService.onDidChangeState(state => this.renderReplayState(state)));
 		this._register(this.replayService.onDidChangeWorkspace(() => void this.learnerFilesTree?.refresh()));
@@ -158,6 +168,8 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 
 	override setVisible(visible: boolean): void {
 		if (!visible) {
+			this.browserActiveContext.reset();
+			this.terminalActiveContext.reset();
 			if (this.replayService.state.status !== 'idle') {
 				this.replayService.stop();
 			}
@@ -276,7 +288,9 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}
 	}
 
-	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop = snapshot?.scrollTop ?? 0, pages?: readonly ICodeScrimBrowserPageState[], activeSurface?: ICodeScrimBrowserSurfaceEvent): void {
+	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop = snapshot?.scrollTop ?? 0, pages?: readonly ICodeScrimBrowserPageState[], activeSurface?: ICodeScrimBrowserSurfaceEvent, teachingSurface?: CodeScrimTeachingSurface): void {
+		this.browserActiveContext.set(teachingSurface === 'browser');
+		this.terminalActiveContext.set(teachingSurface === 'terminal');
 		this.browserWindowService.showLearnerSnapshot(snapshot, scrollTop, pages, activeSurface);
 	}
 

@@ -3,6 +3,21 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+.codescrim-startup-cover {
+	position: fixed;
+	inset: 0;
+	z-index: 10000;
+	display: grid;
+	place-items: center;
+	background: var(--vscode-editor-background);
+	color: var(--vscode-editor-foreground);
+}
+
+.codescrim-startup-cover-brand {
+	font-size: var(--vscode-fontSize-heading1);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
 .codescrim-course-editor {
 	display: grid;
 	box-sizing: border-box;

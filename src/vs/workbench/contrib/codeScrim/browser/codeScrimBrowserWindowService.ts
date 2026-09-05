@@ -60,7 +60,7 @@ export class CodeScrimBrowserWindowService extends Disposable implements ICodeSc
 			title: 'CodeScrim Browser',
 		});
 		this.authorWindow = this._register(new CodeScrimAuthorBrowserWindow(input, auxiliaryWindowService, configurationService,
-			() => browserViewService.getOrCreateLazy({ id: generateUuid(), url: 'about:blank', title: 'CodeScrim Browser' })));
+			(url = 'about:blank') => browserViewService.getOrCreateLazy({ id: generateUuid(), url, title: 'CodeScrim Browser' })));
 		this.onDidChangeAuthorPage = this.authorWindow.onDidChangePage;
 		this.learnerWindow = this._register(new CodeScrimLearnerBrowserWindow(storageService));
 		this._register(browserViewService.registerOpenHandler({

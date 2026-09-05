@@ -5,6 +5,8 @@
 
 import { Event } from '../../../../base/common/event.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
+import { localize } from '../../../../nls.js';
 import { ICodeScrimBrowserTrack } from './codeScrimBrowser.js';
 import { ICodeScrimNarrationTrack } from './codeScrimNarration.js';
 import { CodeScrimTerminalEventData, CodeScrimTerminalState, ICodeScrimTerminalCheckpoint } from './codeScrimTerminal.js';
@@ -14,6 +16,7 @@ export const CODE_SCRIM_STOP_RECORDING_COMMAND_ID = 'codescrim.stopRecording';
 export const CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID = 'codescrim.pauseRecording';
 export const CODE_SCRIM_RESUME_RECORDING_COMMAND_ID = 'codescrim.resumeRecording';
 export const CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID = 'codescrim.discardRecording';
+export const CodeScrimRecordingActiveContext = new RawContextKey<boolean>('codeScrim.recordingActive', false, localize('codeScrim.recordingActive', "Whether a CodeScrim recording is active or paused"));
 
 export interface ICodeScrimWorkspaceResource {
 	readonly root: number;

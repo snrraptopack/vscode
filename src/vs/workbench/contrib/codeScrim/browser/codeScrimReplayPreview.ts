@@ -11,7 +11,7 @@ import { EndOfLineSequence, ITextModel } from '../../../../editor/common/model.j
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { findCodeScrimActiveSurface, findCodeScrimBrowserPages, findCodeScrimBrowserScroll, findCodeScrimBrowserSnapshot } from '../common/codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, CodeScrimTerminalEvent, ICodeScrimDocumentCheckpoint, ICodeScrimRecordingDraft, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
-import { findCodeScrimCheckpoint, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
+import { findCodeScrimCheckpoint, findCodeScrimTeachingSurface, ICodeScrimReplaySurface } from '../common/codeScrimReplay.js';
 import { CodeScrimTerminalReplay } from './codeScrimTerminalReplay.js';
 
 interface IEditorPreviewState {
@@ -50,6 +50,7 @@ export class CodeScrimReplayPreview extends Disposable {
 			findCodeScrimBrowserScroll(draft.browser, target, browserSnapshot?.pageId)?.scrollTop,
 			findCodeScrimBrowserPages(draft.browser, target),
 			findCodeScrimActiveSurface(draft.browser, target),
+			findCodeScrimTeachingSurface(draft, target),
 		);
 	}
 

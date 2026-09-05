@@ -86,11 +86,11 @@ suite('CodeScrimBrowser', () => {
 
 	test('resolves tab structure and active teaching surface', () => {
 		assert.deepStrictEqual(findCodeScrimBrowserPages(track, 200), [
-			{ pageId: 'one', url: 'http://one', title: 'One', active: true },
+			{ pageId: 'one', url: 'http://one', title: 'One', active: true, snapshot: track.snapshots[0], scrollTop: 20 },
 		]);
 		assert.deepStrictEqual(findCodeScrimBrowserPages(track, 600), [
-			{ pageId: 'one', url: 'http://one', title: 'One', active: false },
-			{ pageId: 'two', url: 'http://two', title: 'Two', active: true },
+			{ pageId: 'one', url: 'http://one', title: 'One', active: false, snapshot: track.snapshots[1], scrollTop: 220 },
+			{ pageId: 'two', url: 'http://two', title: 'Two', active: true, snapshot: track.snapshots[2], scrollTop: 80 },
 		]);
 		assert.strictEqual(findCodeScrimActiveSurface(track, 425)?.surface, 'workbench');
 		assert.strictEqual(findCodeScrimActiveSurface(track, 600)?.pageId, 'two');

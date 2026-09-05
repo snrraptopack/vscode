@@ -21,12 +21,13 @@ import { localize } from '../../../../nls.js';
 import { EditorResourceAccessor, SideBySideEditor } from '../../../common/editor.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { IContextKey, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
 import { ITerminalService } from '../../terminal/browser/terminal.js';
 import { ICodeScrimPackageService } from '../common/codeScrimPackage.js';
-import { CodeScrimRecordingBuffer, CodeScrimRecordingEventData, CodeScrimRecordingState, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
+import { CodeScrimRecordingActiveContext, CodeScrimRecordingBuffer, CodeScrimRecordingEventData, CodeScrimRecordingState, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from '../common/codeScrimRecording.js';
 import { CodeScrimNarrationCapture } from './codeScrimNarrationCapture.js';
 import { CodeScrimBrowserCapture } from './codeScrimBrowserCapture.js';
 import { CodeScrimTerminalRecorder } from './codeScrimTerminalRecorder.js';
@@ -57,6 +58,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 	private _state: CodeScrimRecordingState = Object.freeze({ status: 'idle' });
 	private _lastDraft: ICodeScrimRecordingDraft | undefined;
 	private initialization: Promise<void> | undefined;
+	private readonly recordingActiveContext: IContextKey<boolean>;
 	private pendingWorkspaceChanges: Promise<void> = Promise.resolve();
 	private readonly knownWorkspaceResources = new Set<string>();
 	private readonly _onDidChangeState = this._register(new Emitter<CodeScrimRecordingState>());
@@ -81,6 +83,7 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		@INotificationService notificationService: INotificationService,
 		@ICodeScrimBrowserWindowService browserWindowService: ICodeScrimBrowserWindowService,
 		@ICodeScrimPackageService private readonly packageService: ICodeScrimPackageService,
+		@IContextKeyService contextKeyService: IContextKeyService,
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
 		@ITextFileService private readonly textFileService: ITextFileService,
 		@ITerminalService terminalService: ITerminalService,
@@ -88,6 +91,8 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
+		this.recordingActiveContext = CodeScrimRecordingActiveContext.bindTo(contextKeyService);
+		this._register({ dispose: () => this.recordingActiveContext.reset() });
 		this.terminalRecorder = new CodeScrimTerminalRecorder(terminalService, event => this.append(event));
 		this.narrationCapture = this._register(new CodeScrimNarrationCapture(notificationService, logService));
 		this.browserCapture = this._register(new CodeScrimBrowserCapture(browserWindowService, logService));
@@ -591,18 +596,21 @@ export class CodeScrimRecorderService extends Disposable implements ICodeScrimRe
 			})
 			: Object.freeze({ status: 'idle' });
 		this.syncStatusbar();
+		this.recordingActiveContext.set(this._state.status === 'recording' || this._state.status === 'paused');
 		this._onDidChangeState.fire(this._state);
 	}
 
 	private publishPreparing(): void {
 		this._state = Object.freeze({ status: 'preparing' });
 		this.syncStatusbar();
+		this.recordingActiveContext.reset();
 		this._onDidChangeState.fire(this._state);
 	}
 
 	private publishIdle(): void {
 		this._state = Object.freeze({ status: 'idle' });
 		this.syncStatusbar();
+		this.recordingActiveContext.reset();
 		this._onDidChangeState.fire(this._state);
 	}
 

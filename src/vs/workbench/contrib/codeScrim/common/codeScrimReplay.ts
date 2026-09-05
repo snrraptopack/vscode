@@ -6,8 +6,10 @@
 import { Event } from '../../../../base/common/event.js';
 import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { ITextModel } from '../../../../editor/common/model.js';
+import { localize } from '../../../../nls.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { ICodeScrimBrowserPageState, ICodeScrimBrowserSnapshot, ICodeScrimBrowserSurfaceEvent } from './codeScrimBrowser.js';
+import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
+import { findCodeScrimActiveSurface, ICodeScrimBrowserPageState, ICodeScrimBrowserSnapshot, ICodeScrimBrowserSurfaceEvent } from './codeScrimBrowser.js';
 import { CodeScrimRecordingBuffer, CodeScrimRecordingEvent, ICodeScrimRecordingCheckpoint, ICodeScrimRecordingDraft, ICodeScrimScrollPosition, ICodeScrimSelection, ICodeScrimWorkspaceEntryCheckpoint, ICodeScrimWorkspaceResource } from './codeScrimRecording.js';
 import { ICodeScrimTerminalCommandActivity, ICodeScrimTerminalCommandCluster, ICodeScrimTerminalState } from './codeScrimTerminal.js';
 
@@ -15,6 +17,9 @@ export const CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID = 'codescrim.replayLast
 export const CODE_SCRIM_RESTART_REPLAY_COMMAND_ID = 'codescrim.restartReplay';
 export const CODE_SCRIM_RESUME_REPLAY_COMMAND_ID = 'codescrim.resumeReplay';
 export const CODE_SCRIM_STOP_REPLAY_COMMAND_ID = 'codescrim.stopReplay';
+export const CodeScrimInstructorBrowserActiveContext = new RawContextKey<boolean>('codeScrim.instructorBrowserActive', false, localize('codeScrim.instructorBrowserActive', "Whether the instructor is using the browser at the current lesson position"));
+export const CodeScrimInstructorTerminalActiveContext = new RawContextKey<boolean>('codeScrim.instructorTerminalActive', false, localize('codeScrim.instructorTerminalActive', "Whether the instructor is using the terminal at the current lesson position"));
+export type CodeScrimTeachingSurface = 'workbench' | 'browser' | 'terminal';
 
 export function collectCodeScrimTerminalCommands(events: readonly CodeScrimRecordingEvent[]): readonly ICodeScrimTerminalCommandActivity[] {
 	const commands: ICodeScrimTerminalCommandActivity[] = [];
@@ -95,8 +100,23 @@ export interface ICodeScrimReplaySurface {
 	applyScroll(resource: ICodeScrimWorkspaceResource, position: ICodeScrimScrollPosition): void;
 	closeResource(resource: ICodeScrimWorkspaceResource): void;
 	previewResource(resource: ICodeScrimWorkspaceResource, model: ITextModel, selections?: readonly ICodeScrimSelection[], scrollPosition?: ICodeScrimScrollPosition): void;
-	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop?: number, pages?: readonly ICodeScrimBrowserPageState[], activeSurface?: ICodeScrimBrowserSurfaceEvent): void;
+	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop?: number, pages?: readonly ICodeScrimBrowserPageState[], activeSurface?: ICodeScrimBrowserSurfaceEvent, teachingSurface?: CodeScrimTeachingSurface): void;
 	clear(preserveBrowser?: boolean): void;
+}
+
+export function findCodeScrimTeachingSurface(draft: ICodeScrimRecordingDraft, position: number): CodeScrimTeachingSurface {
+	const browserSurface = findCodeScrimActiveSurface(draft.browser, position);
+	let latestEvent: CodeScrimRecordingEvent | undefined;
+	for (let index = draft.events.length - 1; index >= 0; index--) {
+		if (draft.events[index].timestamp <= position) {
+			latestEvent = draft.events[index];
+			break;
+		}
+	}
+	if (browserSurface && browserSurface.timestamp >= (latestEvent?.timestamp ?? -1)) {
+		return browserSurface.surface;
+	}
+	return latestEvent?.domain === 'terminal' ? 'terminal' : 'workbench';
 }
 
 export interface ICodeScrimLearnerConflict {

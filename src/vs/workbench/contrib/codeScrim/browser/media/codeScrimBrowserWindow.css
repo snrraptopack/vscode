@@ -127,6 +127,16 @@
 	animation: codescrim-browser-spin 1s linear infinite;
 }
 
+/* Keep the instructor's active teaching surface visible even after the learner
+ * hides it. These checked title-bar actions are driven by the replay timeline. */
+.monaco-workbench .part.titlebar .monaco-action-bar .action-label.codicon-globe.checked,
+.monaco-workbench .part.titlebar .monaco-action-bar .action-label.codicon-terminal.checked {
+	color: var(--vscode-focusBorder);
+	background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent);
+	box-shadow: 0 0 0 1px var(--vscode-focusBorder), 0 0 14px var(--vscode-focusBorder);
+	animation: codescrim-teaching-surface-pulse 1.6s ease-in-out infinite;
+}
+
 .codescrim-browser-window-address {
 	-webkit-app-region: no-drag;
 	flex: 1;
@@ -184,6 +194,10 @@
 
 @keyframes codescrim-browser-spin {
 	to { transform: rotate(360deg); }
+}
+
+@keyframes codescrim-teaching-surface-pulse {
+	50% { box-shadow: 0 0 0 1px var(--vscode-focusBorder), 0 0 22px var(--vscode-focusBorder); }
 }
 
 .codescrim-learner-browser {
@@ -248,7 +262,7 @@
 }
 
 .codescrim-learner-browser-title {
-	flex: 1;
+	flex: none;
 	text-align: left;
 	user-select: none;
 	font-weight: var(--vscode-fontWeight-semiBold);
@@ -263,13 +277,27 @@
 }
 
 .codescrim-learner-browser-tabs {
-	max-width: 40%;
+	display: flex;
+	flex: 1;
+	gap: 2px;
 	min-width: 0;
-	border: var(--vscode-strokeThickness) solid var(--vscode-dropdown-border);
-	border-radius: var(--vscode-cornerRadius-small);
-	background: var(--vscode-dropdown-background);
-	color: var(--vscode-dropdown-foreground);
-	font: inherit;
+	overflow-x: auto;
+}
+
+.codescrim-learner-browser .codescrim-learner-browser-tab {
+	flex: 0 1 180px;
+	min-width: 72px;
+	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size100);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-descriptionForeground);
+}
+
+.codescrim-learner-browser .codescrim-learner-browser-tab.active {
+	color: var(--vscode-foreground);
+	background: var(--vscode-tab-activeBackground);
+	box-shadow: inset 0 -2px var(--vscode-focusBorder);
 }
 
 .codescrim-learner-browser .codescrim-learner-browser-resize {
@@ -287,12 +315,19 @@
 	display: none;
 }
 
+.codescrim-learner-browser.expanded {
+	z-index: 10000;
+	border: 0;
+	border-radius: 0;
+}
+
 .codescrim-learner-browser.adjusting iframe {
 	pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.codescrim-browser-window-button.loading .codicon {
+	.codescrim-browser-window-button.loading .codicon,
+	.monaco-workbench .part.titlebar .monaco-action-bar .action-label.checked {
 		animation: none;
 	}
 }

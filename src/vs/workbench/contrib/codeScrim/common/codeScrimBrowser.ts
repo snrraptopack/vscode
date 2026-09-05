@@ -61,6 +61,9 @@ export interface ICodeScrimBrowserPageState {
 	readonly url: string;
 	readonly title: string;
 	readonly active: boolean;
+	/** Latest captured state for this tab at the current lesson position. */
+	readonly snapshot?: ICodeScrimBrowserSnapshot;
+	readonly scrollTop?: number;
 }
 
 /**
@@ -119,6 +122,10 @@ export function findCodeScrimBrowserPages(track: ICodeScrimBrowserTrack | undefi
 			url: snapshotIsNewer ? snapshot.url : page.url || snapshot?.url || 'about:blank',
 			title: snapshotIsNewer ? snapshot.title : page.title || snapshot?.title || '',
 			active: pageId === activePageId,
+			...(snapshot ? {
+				snapshot,
+				scrollTop: findCodeScrimBrowserScroll(track, position, pageId)?.scrollTop ?? snapshot.scrollTop,
+			} : {}),
 		};
 	});
 }

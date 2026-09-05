@@ -41,12 +41,12 @@ suite('CodeScrimLearnerBrowser', () => {
 		assert.deepStrictEqual({ hidden: panel.hidden, sameFrame: panel.querySelector('iframe') === frame }, { hidden: false, sameFrame: true });
 	});
 
-	test('expansion uses workbench height and restores the floating bounds', () => {
+	test('expansion fills the whole workbench and restores the floating bounds', () => {
 		const { panel } = setup();
 		const bounds = panel.style.cssText;
 		const expand = Array.from(panel.querySelectorAll('button')).find(button => button.textContent === 'Expand')!;
 		expand.click();
-		assert.deepStrictEqual({ width: panel.style.width, height: panel.style.height }, { width: '968px', height: '636px' });
+		assert.deepStrictEqual({ width: panel.style.width, height: panel.style.height, x: panel.style.left, y: panel.style.top }, { width: '1000px', height: '700px', x: '0px', y: '0px' });
 		expand.click();
 		assert.strictEqual(panel.style.cssText, bounds);
 	});
@@ -108,5 +108,27 @@ suite('CodeScrimLearnerBrowser', () => {
 		const { browser, panel } = setup();
 		browser.show(snapshot, 0, [{ pageId: snapshot.pageId, url: 'https://example.test/settings', title: 'Settings', active: true }]);
 		assert.strictEqual(panel.querySelector('input')!.value, 'https://example.test/settings');
+	});
+
+	test('renders every recorded page as a tab and lets the learner switch locally', () => {
+		const { browser, panel } = setup();
+		const second: ICodeScrimBrowserSnapshot = {
+			...snapshot,
+			pageId: 'second',
+			url: 'https://second.test',
+			title: 'Second',
+			html: '<html><head></head><body><p>Second page</p></body></html>',
+		};
+		browser.show(second, 0, [
+			{ pageId: snapshot.pageId, url: snapshot.url, title: snapshot.title, active: false, snapshot, scrollTop: 0 },
+			{ pageId: second.pageId, url: second.url, title: second.title, active: true, snapshot: second, scrollTop: 0 },
+		]);
+		const tabs = panel.querySelectorAll<HTMLButtonElement>('.codescrim-learner-browser-tab');
+		assert.strictEqual(tabs.length, 2);
+		assert.strictEqual(tabs[1].classList.contains('active'), true);
+		tabs[0].click();
+		assert.strictEqual(panel.querySelector('input')!.value, snapshot.url);
+		assert.strictEqual(tabs[0].classList.contains('active'), false); // The tab strip was rerendered.
+		assert.strictEqual(panel.querySelector<HTMLButtonElement>('.codescrim-learner-browser-tab')!.classList.contains('active'), true);
 	});
 });

@@ -42,7 +42,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		private readonly initialInput: BrowserEditorInput,
 		private readonly auxiliaryWindowService: IAuxiliaryWindowService,
 		private readonly configurationService: IConfigurationService,
-		private readonly createPage: () => BrowserEditorInput,
+		private readonly createPage: (url?: string) => BrowserEditorInput,
 	) {
 		super();
 	}
@@ -70,7 +70,6 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		const auxiliaryWindow = await this.auxiliaryWindowService.open({
 			bounds: { width: 1180, height: 780 },
 			nativeTitlebar: false,
-			noBackgroundThrottling: true,
 			backgroundColor: '#181818',
 		});
 		try {
@@ -191,8 +190,14 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 			this.address?.blur();
 			const engine = this.configurationService.getValue<BrowserSearchEngineValue>(BrowserSearchEngineSettingId);
 			const search = engine && engine !== BROWSER_SEARCH_NONE && resolveAddressBarInputType(text) !== 'url';
-			void this.activeModel?.loadURL(search ? buildSearchUrl(text, engine) : text, { source: search ? 'searchInput' : 'urlInput' });
-			void this.activeModel?.focus();
+			const destination = search ? buildSearchUrl(text, engine) : text;
+			const active = this.activeModel;
+			if (active && opensAnotherSite(active.url, destination)) {
+				void this.addPage(this.createPage(destination), true);
+			} else {
+				void active?.loadURL(destination, { source: search ? 'searchInput' : 'urlInput' });
+				void active?.focus();
+			}
 		});
 
 		this.renderTabs();
@@ -357,5 +362,23 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		glyph.className = ThemeIcon.asClassName(icon);
 		button.appendChild(glyph);
 		return button;
+	}
+}
+
+function opensAnotherSite(currentValue: string, destinationValue: string): boolean {
+	try {
+		const current = new URL(currentValue);
+		const destination = parseAddressUrl(destinationValue);
+		return current.protocol !== 'about:' && current.origin !== destination.origin;
+	} catch {
+		return false;
+	}
+}
+
+function parseAddressUrl(value: string): URL {
+	try {
+		return new URL(value);
+	} catch {
+		return new URL(`https://${value}`);
 	}
 }
