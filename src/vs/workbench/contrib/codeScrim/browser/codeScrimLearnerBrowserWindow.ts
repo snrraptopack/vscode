@@ -226,7 +226,9 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 		}
 		this.layout();
 		if (this.address) {
-			this.address.value = this.snapshot?.url ?? '';
+			// Navigation metadata can arrive before the next serialized DOM snapshot.
+			const page = this.pages.find(page => page.pageId === this.snapshot?.pageId);
+			this.address.value = page?.url ?? this.snapshot?.url ?? '';
 			this.address.placeholder = localize('codeScrim.recordedBrowserAddress', "Recorded browser");
 		}
 		this.frame.hidden = !this.snapshot;

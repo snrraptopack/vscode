@@ -103,4 +103,10 @@ suite('CodeScrimLearnerBrowser', () => {
 		pointer(header, 'pointermove', 340, 370);
 		assert.deepStrictEqual({ x: panel.style.left, y: panel.style.top }, { x: '224px', y: '256px' });
 	});
+
+	test('address follows navigation metadata before the next DOM snapshot', () => {
+		const { browser, panel } = setup();
+		browser.show(snapshot, 0, [{ pageId: snapshot.pageId, url: 'https://example.test/settings', title: 'Settings', active: true }]);
+		assert.strictEqual(panel.querySelector('input')!.value, 'https://example.test/settings');
+	});
 });

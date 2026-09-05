@@ -32,6 +32,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 	private browserHost: HTMLElement | undefined;
 	private tabs: HTMLElement | undefined;
 	private address: HTMLInputElement | undefined;
+	private addressEditing = false;
 	private back: HTMLButtonElement | undefined;
 	private forward: HTMLButtonElement | undefined;
 	private reload: HTMLButtonElement | undefined;
@@ -150,13 +151,20 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		toolbar.append(this.back, this.forward, this.reload, this.address, tools);
 		store.add(addDisposableListener(tools, EventType.CLICK, () => void this.activeModel?.toggleDevTools()));
 		store.add(addDisposableListener(this.address, EventType.FOCUS, () => this.address?.select()));
-		store.add(addDisposableListener(this.address, EventType.BLUR, () => this.refreshNavigation()));
+		store.add(addDisposableListener(this.address, EventType.INPUT, () => this.addressEditing = true));
+		store.add(addDisposableListener(this.address, EventType.BLUR, () => {
+			this.addressEditing = false;
+			this.refreshNavigation();
+		}));
 		store.add(addDisposableListener(targetDocument, EventType.KEY_DOWN, (event: KeyboardEvent) => {
 			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'l') {
 				event.preventDefault();
 				this.address?.focus();
 				this.address?.select();
 			} else if (event.key === 'Escape' && targetDocument.activeElement === this.address) {
+				this.addressEditing = false;
+				this.refreshNavigation();
+				this.address?.blur();
 				void this.activeModel?.focus();
 			}
 		}));
@@ -179,9 +187,12 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		toolbar.addEventListener('submit', event => {
 			event.preventDefault();
 			const text = this.address?.value.trim() || 'about:blank';
+			this.addressEditing = false;
+			this.address?.blur();
 			const engine = this.configurationService.getValue<BrowserSearchEngineValue>(BrowserSearchEngineSettingId);
 			const search = engine && engine !== BROWSER_SEARCH_NONE && resolveAddressBarInputType(text) !== 'url';
 			void this.activeModel?.loadURL(search ? buildSearchUrl(text, engine) : text, { source: search ? 'searchInput' : 'urlInput' });
+			void this.activeModel?.focus();
 		});
 
 		this.renderTabs();
@@ -201,6 +212,9 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		const previous = this.activeModel;
 		this.activePageId = pageId;
 		const active = this.activeModel;
+		if (previous !== active) {
+			this.addressEditing = false;
+		}
 		if (previous && previous !== active) {
 			void previous.setVisible(false);
 		}
@@ -257,7 +271,9 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		if (!model) {
 			return;
 		}
-		if (this.address && this.address.ownerDocument.activeElement !== this.address) {
+		// Native page focus can leave the address as the chrome document's activeElement.
+		// Protect unsubmitted edits, not focus, so redirects and link navigation still update it.
+		if (this.address && !this.addressEditing) {
 			this.address.value = model.url || 'about:blank';
 		}
 		if (this.back) {
@@ -324,6 +340,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		this.browserHost = undefined;
 		this.tabs = undefined;
 		this.address = undefined;
+		this.addressEditing = false;
 		this.back = undefined;
 		this.forward = undefined;
 		this.reload = undefined;
