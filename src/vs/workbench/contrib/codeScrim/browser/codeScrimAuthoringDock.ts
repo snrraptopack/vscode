@@ -14,6 +14,8 @@ import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
+import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { CodeScrimCourseEditorInput } from './codeScrimCourseEditorInput.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
 import { CODE_SCRIM_OPEN_RECORDING_COMMAND_ID, CODE_SCRIM_SAVE_RECORDING_COMMAND_ID } from '../common/codeScrimPackage.js';
 import { CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService } from '../common/codeScrimRecording.js';
@@ -37,6 +39,7 @@ export class CodeScrimAuthoringDockContribution extends Disposable implements IW
 		@ICommandService private readonly commandService: ICommandService,
 		@ICodeScrimRecorderService private readonly recorderService: ICodeScrimRecorderService,
 		@ICodeScrimSessionService private readonly sessionService: ICodeScrimSessionService,
+		@IEditorService private readonly editorService: IEditorService,
 	) {
 		super();
 
@@ -64,6 +67,7 @@ export class CodeScrimAuthoringDockContribution extends Disposable implements IW
 		this._register(this.recorderService.onDidChangeState(() => this.render()));
 		this._register(this.recorderService.onDidChangeDraft(() => this.render()));
 		this._register(this.sessionService.onDidChangeState(() => this.updateVisibility()));
+		this._register(this.editorService.onDidActiveEditorChange(() => this.updateVisibility()));
 
 		this.updateVisibility();
 		this.render();
@@ -81,7 +85,7 @@ export class CodeScrimAuthoringDockContribution extends Disposable implements IW
 
 	private updateVisibility(): void {
 		// The learner workbench owns the entire editor canvas while a lesson is open.
-		this.shell.hidden = this.sessionService.state !== undefined;
+		this.shell.hidden = this.sessionService.state !== undefined || this.editorService.activeEditor instanceof CodeScrimCourseEditorInput;
 	}
 
 	private render(): void {

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 .codescrim-lesson-editor {
+	position: relative;
 	box-sizing: border-box;
 	overflow: hidden;
 	background: var(--vscode-editor-background);
@@ -354,7 +355,7 @@
 	display: grid;
 	overflow: hidden;
 	grid-column: 2;
-	grid-template-rows: minmax(0, 1fr) 72px;
+	grid-template-rows: minmax(0, 1fr) 96px;
 	background: var(--vscode-editor-background);
 }
 
@@ -542,18 +543,36 @@
 .codescrim-session-transport {
 	display: grid;
 	box-sizing: border-box;
-	height: 72px;
+	height: 64px;
+	width: min(760px, calc(100% - 48px));
+	margin: auto;
 	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size200);
 	align-items: center;
-	grid-template-columns: auto minmax(160px, 1fr) 34px;
+	grid-template-columns: auto minmax(0, 1fr) 32px;
 	gap: 16px;
-	border-top: 1px solid var(--vscode-panel-border);
+	border: var(--vscode-strokeThickness) solid var(--vscode-widget-border, transparent);
+	border-radius: var(--vscode-cornerRadius-large);
+	box-shadow: 0 4px 16px var(--vscode-widget-shadow);
 	background: var(--vscode-editorWidget-background);
 }
 
 .codescrim-session-transport-controls {
 	display: flex;
 	gap: 6px;
+}
+
+.codescrim-session-more {
+	width: 32px;
+	height: 32px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	color: var(--vscode-icon-foreground);
+	background: transparent;
+	cursor: pointer;
+}
+
+.codescrim-session-more:hover {
+	background: var(--vscode-toolbar-hoverBackground);
 }
 
 .codescrim-session-transport-controls .monaco-button {

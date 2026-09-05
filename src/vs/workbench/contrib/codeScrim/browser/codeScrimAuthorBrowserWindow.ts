@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { getZoomFactor } from '../../../../base/browser/browser.js';
-import { getWindowId } from '../../../../base/browser/dom.js';
+import { addDisposableListener, EventType, getWindowId } from '../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
@@ -15,6 +15,8 @@ import { IBrowserViewEditorOpenOptions } from '../../../../platform/browserView/
 import { IAuxiliaryWindow, IAuxiliaryWindowService } from '../../../services/auxiliaryWindow/browser/auxiliaryWindowService.js';
 import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
 import { IBrowserViewModel } from '../../browserView/common/browserView.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { BROWSER_SEARCH_NONE, BrowserSearchEngineSettingId, BrowserSearchEngineValue, buildSearchUrl, resolveAddressBarInputType } from '../../browserView/common/browserSearch.js';
 
 /** Hosts CodeScrim's real Integrated Browser pages without creating editor tabs. */
 export class CodeScrimAuthorBrowserWindow extends Disposable {
@@ -23,6 +25,8 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 	private readonly windowDisposables = this._register(new MutableDisposable<DisposableStore>());
 	private readonly pageDisposables = this._register(new DisposableMap<string, DisposableStore>());
 	private readonly pages = new Map<string, IBrowserViewModel>();
+	private readonly inputs = new Map<string, BrowserEditorInput>();
+	private readonly tabDisposables = this._register(new DisposableStore());
 	private readonly pageOrder: string[] = [];
 	private auxiliaryWindow: IAuxiliaryWindow | undefined;
 	private browserHost: HTMLElement | undefined;
@@ -36,6 +40,8 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 	constructor(
 		private readonly initialInput: BrowserEditorInput,
 		private readonly auxiliaryWindowService: IAuxiliaryWindowService,
+		private readonly configurationService: IConfigurationService,
+		private readonly createPage: () => BrowserEditorInput,
 	) {
 		super();
 	}
@@ -57,7 +63,9 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 			this.closeWindow();
 		}
 
-		await this.addPage(this.initialInput, true);
+		if (!this.pages.size) {
+			await this.addPage(this.initialInput.isDisposed() ? this.createPage() : this.initialInput, true);
+		}
 		const auxiliaryWindow = await this.auxiliaryWindowService.open({
 			bounds: { width: 1180, height: 780 },
 			nativeTitlebar: false,
@@ -90,6 +98,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		let model = this.pages.get(input.id);
 		if (!model) {
 			model = await input.resolve();
+			this.inputs.set(input.id, input);
 			this.pages.set(model.id, model);
 			this.pageOrder.push(model.id);
 			this._onDidChangePage.fire({ kind: 'opened', pageId: model.id });
@@ -135,8 +144,22 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		this.address.className = 'codescrim-browser-window-address';
 		this.address.type = 'text';
 		this.address.spellcheck = false;
+		this.address.placeholder = localize('codeScrim.browserAddressPlaceholder', "Search or enter an address");
 		this.address.setAttribute('aria-label', localize('codeScrim.browserAddress', "Browser address"));
-		toolbar.append(this.back, this.forward, this.reload, this.address);
+		const tools = this.createIconButton(Codicon.tools, localize('codeScrim.browserDevTools', "Developer Tools"));
+		toolbar.append(this.back, this.forward, this.reload, this.address, tools);
+		store.add(addDisposableListener(tools, EventType.CLICK, () => void this.activeModel?.toggleDevTools()));
+		store.add(addDisposableListener(this.address, EventType.FOCUS, () => this.address?.select()));
+		store.add(addDisposableListener(this.address, EventType.BLUR, () => this.refreshNavigation()));
+		store.add(addDisposableListener(targetDocument, EventType.KEY_DOWN, (event: KeyboardEvent) => {
+			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'l') {
+				event.preventDefault();
+				this.address?.focus();
+				this.address?.select();
+			} else if (event.key === 'Escape' && targetDocument.activeElement === this.address) {
+				void this.activeModel?.focus();
+			}
+		}));
 
 		this.browserHost = mainWindow.document.createElement('main');
 		this.browserHost.className = 'codescrim-browser-window-content';
@@ -155,7 +178,10 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		this.reload.addEventListener('click', event => { event.preventDefault(); void this.activeModel?.reload(); });
 		toolbar.addEventListener('submit', event => {
 			event.preventDefault();
-			void this.activeModel?.loadURL(this.address?.value.trim() || 'about:blank');
+			const text = this.address?.value.trim() || 'about:blank';
+			const engine = this.configurationService.getValue<BrowserSearchEngineValue>(BrowserSearchEngineSettingId);
+			const search = engine && engine !== BROWSER_SEARCH_NONE && resolveAddressBarInputType(text) !== 'url';
+			void this.activeModel?.loadURL(search ? buildSearchUrl(text, engine) : text, { source: search ? 'searchInput' : 'urlInput' });
 		});
 
 		this.renderTabs();
@@ -192,6 +218,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		if (!this.tabs) {
 			return;
 		}
+		this.tabDisposables.clear();
 		this.tabs.textContent = '';
 		for (const pageId of this.pageOrder) {
 			const model = this.pages.get(pageId);
@@ -208,9 +235,21 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 			const label = mainWindow.document.createElement('span');
 			label.textContent = model.title || model.url || localize('codeScrim.untitledBrowserPage', "Browser");
 			tab.append(icon, label);
-			tab.addEventListener('click', () => this.activatePage(pageId));
-			this.tabs.append(tab);
+			tab.setAttribute('aria-pressed', String(pageId === this.activePageId));
+			this.tabDisposables.add(addDisposableListener(tab, EventType.CLICK, () => this.activatePage(pageId)));
+			const item = mainWindow.document.createElement('div');
+			item.className = 'codescrim-browser-tab-item';
+			const close = this.createIconButton(Codicon.close, localize('codeScrim.closeBrowserTab', "Close Tab"));
+			this.tabDisposables.add(addDisposableListener(close, EventType.CLICK, () => this.inputs.get(pageId)?.dispose()));
+			item.append(tab, close);
+			this.tabs.append(item);
 		}
+		const add = this.createIconButton(Codicon.add, localize('codeScrim.newBrowserTab', "New Tab"));
+		this.tabDisposables.add(addDisposableListener(add, EventType.CLICK, async () => {
+			await this.addPage(this.createPage(), true);
+			this.address?.focus();
+		}));
+		this.tabs.append(add);
 	}
 
 	private refreshNavigation(): void {
@@ -218,7 +257,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		if (!model) {
 			return;
 		}
-		if (this.address) {
+		if (this.address && this.address.ownerDocument.activeElement !== this.address) {
 			this.address.value = model.url || 'about:blank';
 		}
 		if (this.back) {
@@ -253,6 +292,7 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 	}
 
 	private removePage(pageId: string): void {
+		this.inputs.delete(pageId);
 		this.pages.delete(pageId);
 		this._onDidChangePage.fire({ kind: 'closed', pageId });
 		this.pageDisposables.deleteAndDispose(pageId);
@@ -262,7 +302,11 @@ export class CodeScrimAuthorBrowserWindow extends Disposable {
 		}
 		if (this.activePageId === pageId) {
 			this.activePageId = this.pageOrder.at(-1);
-			this.activatePage(this.activePageId);
+			if (this.activePageId) {
+				this.activatePage(this.activePageId);
+			} else if (this.auxiliaryWindow) {
+				void this.addPage(this.createPage(), true);
+			}
 		} else {
 			this.renderTabs();
 		}

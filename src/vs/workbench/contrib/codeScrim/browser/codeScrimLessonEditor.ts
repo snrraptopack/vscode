@@ -93,6 +93,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	private readonly openedResources: ICodeScrimWorkspaceResource[] = [];
 	private readonly layoutLease = this._register(new MutableDisposable<IDisposable>());
 	private readonly replaySurfaceLease = this._register(new MutableDisposable<IDisposable>());
+	private readonly browserHostLease = this._register(new MutableDisposable<IDisposable>());
 	private navigationMode: 'course' | 'files' = 'course';
 	private navigationModeManuallySelected = false;
 	private timelineScrubbing = false;
@@ -151,6 +152,8 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.createNavigation(this.workspace);
 		this.createStage(this.workspace);
 		this.createContextPanel(this.workspace);
+		this.setPaneCollapsed('navigation', true);
+		this.setPaneCollapsed('context', true);
 	}
 
 	override setVisible(visible: boolean): void {
@@ -164,6 +167,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		}
 		super.setVisible(visible);
 		this.layoutLease.value = visible ? this.layoutService.enterCodeScrimMode() : undefined;
+		this.browserHostLease.value = visible && this.root ? this.browserWindowService.attachLearnerHost(this.root) : undefined;
 		this.replaySurfaceLease.value = visible ? this.replayService.attachSurface(this) : undefined;
 	}
 
@@ -412,7 +416,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			readOnly: false,
 			domReadOnly: false,
 			automaticLayout: false,
-			minimap: { enabled: true },
+			minimap: { enabled: false },
 			scrollBeyondLastLine: false,
 			ariaLabel: localize('codeScrim.replayEditorAriaLabel', "Learner workspace editor"),
 		}, { isSimpleWidget: false }));
@@ -478,16 +482,6 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			}
 		}));
 
-		const restartButton = this._register(new Button(controls, { ...defaultButtonStyles, secondary: true }));
-		restartButton.label = localize('codeScrim.lessonRestart', "Restart");
-		this._register(restartButton.onDidClick(() => {
-			if (this.replayService.state.status !== 'idle') {
-				void this.replayService.restart();
-			} else {
-				this.sessionService.restart();
-			}
-		}));
-
 		const timeline = DOM.append(transport, DOM.$('.codescrim-session-timeline'));
 		this.experimentPopover = DOM.append(timeline, DOM.$('.codescrim-session-experiment-popover'));
 		this.experimentPopover.hidden = true;
@@ -540,7 +534,16 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 			}
 		}));
 
-		DOM.append(transport, DOM.$('.codescrim-session-speed', undefined, localize('codeScrim.playbackSpeed', "1×")));
+		const more = this.createIconButton(transport, 'codescrim-session-more', localize('codeScrim.playbackOptions', "Playback Options"), Codicon.more, () => {
+			this.contextMenuService.showContextMenu({
+				getAnchor: () => more,
+				getActions: () => [{
+					id: 'codescrim.restart', label: localize('codeScrim.lessonRestart', "Restart"), enabled: true,
+					tooltip: '', class: undefined,
+					run: async () => this.replayService.state.status !== 'idle' ? this.replayService.restart() : this.sessionService.restart(),
+				}],
+			});
+		});
 	}
 
 	private renderLearnerExperimentMarkers(): void {
@@ -733,8 +736,9 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.timelineScrubbing = true;
 		this.resumeAfterTimelineScrub = this.replayService.state.status === 'playing';
 		this.timelinePause = (this.resumeAfterTimelineScrub ? this.replayService.pause() : Promise.resolve()).then(() => {
-			if (this.timelineScrubbing) {
-				this.replayService.preview(Number(this.progress?.value ?? this.replayService.state.position));
+			const state = this.replayService.state;
+			if (this.timelineScrubbing && state.status !== 'idle') {
+				this.replayService.preview(Number(this.progress?.value ?? state.position));
 			}
 		});
 	}

@@ -4,12 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../base/common/codicons.js';
+import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { basename, extname, joinPath } from '../../../../base/common/resources.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
-import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
@@ -57,11 +57,17 @@ class CodeScrimRecordingControlsContribution {
 	constructor(
 		@ICodeScrimRecorderService recorderService: ICodeScrimRecorderService,
 		@ICodeScrimLayoutService layoutService: ICodeScrimLayoutService,
+		@IEditorService editorService: IEditorService,
+		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		layoutService.restoreStaleCodeScrimLayout();
 		// Resolve the recorder after workbench restoration so its native controls and listeners are
 		// available without requiring the command palette to instantiate the service first.
 		void recorderService.initialize();
+		// Preserve restored lessons; all other normal launches enter through CodeScrim Home.
+		if (!(editorService.activeEditor instanceof CodeScrimLessonEditorInput)) {
+			void editorService.openEditor(instantiationService.createInstance(CodeScrimCourseEditorInput), { pinned: true });
+		}
 	}
 }
 
@@ -226,6 +232,8 @@ registerAction2(class extends Action2 {
 		super({
 			id: CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID,
 			title: localize2('codeScrim.openCourseHome', "Open CodeScrim"),
+			icon: Codicon.home,
+			menu: { id: MenuId.TitleBar, group: 'navigation', order: 0 },
 			category: localize2('codeScrim.category', "CodeScrim"),
 			f1: true,
 		});
@@ -294,7 +302,10 @@ registerAction2(class extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor): Promise<void> {
+	async run(accessor: ServicesAccessor, selectedResource?: URI, learn = false): Promise<void> {
+		const editorService = accessor.get(IEditorService);
+		const instantiationService = accessor.get(IInstantiationService);
+		const replayService = accessor.get(ICodeScrimReplayService);
 		const recorderService = accessor.get(ICodeScrimRecorderService);
 		const packageService = accessor.get(ICodeScrimPackageService);
 		const fileDialogService = accessor.get(IFileDialogService);
@@ -304,8 +315,7 @@ registerAction2(class extends Action2 {
 			return;
 		}
 
-		const resources = await fileDialogService.showOpenDialog({
-			forceNative: true,
+		const resources = selectedResource ? [selectedResource] : await fileDialogService.showOpenDialog({
 			title: localize('codeScrim.openRecordingDialogTitle', "Open CodeScrim Recording"),
 			openLabel: localize('codeScrim.openRecordingDialogLabel', "Open Recording"),
 			canSelectFiles: true,
@@ -325,7 +335,12 @@ registerAction2(class extends Action2 {
 			// recording must be available after restart rather than an older recovery draft.
 			await packageService.saveDraft(draft);
 			recorderService.setLastDraft(draft);
-			notificationService.info(localize('codeScrim.recordingOpened', "Opened and verified CodeScrim recording {0}. It is ready to replay.", basename(resource)));
+			if (learn) {
+				await openRecordingPreview(editorService, instantiationService, draft);
+				await replayService.replay(draft);
+			} else {
+				notificationService.info(localize('codeScrim.recordingOpened', "Opened and verified CodeScrim recording {0}. It is ready to replay.", basename(resource)));
+			}
 		} catch (error) {
 			notificationService.error(error);
 		}

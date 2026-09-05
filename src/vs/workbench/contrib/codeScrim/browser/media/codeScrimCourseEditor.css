@@ -4,120 +4,99 @@
  *--------------------------------------------------------------------------------------------*/
 
 .codescrim-course-editor {
+	display: grid;
 	box-sizing: border-box;
 	overflow: auto;
+	place-items: center;
+	padding: var(--vscode-spacing-size400);
 	background: var(--vscode-editor-background);
 	color: var(--vscode-editor-foreground);
 }
-
 .codescrim-course-shell {
-	box-sizing: border-box;
-	width: min(1120px, 100%);
-	margin: 0 auto;
-	padding: clamp(32px, 6vw, 72px);
+	width: min(100%, 720px);
+	margin: auto;
 }
-
-.codescrim-course-hero {
-	max-width: 760px;
-}
-
-.codescrim-course-eyebrow {
-	margin: 0 0 12px;
-	color: var(--vscode-textLink-foreground);
-	font-size: var(--vscode-fontSize-label1);
+.codescrim-course-brand {
+	margin: 0 0 var(--vscode-spacing-size320);
+	font-size: var(--vscode-fontSize-heading2);
 	font-weight: var(--vscode-fontWeight-semiBold);
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
 }
-
-.codescrim-course-hero h1 {
-	margin: 0;
-	font-size: clamp(30px, 5vw, 52px);
+.codescrim-course-shell h1 {
+	margin: 0 0 var(--vscode-spacing-size120);
+	font-size: var(--vscode-fontSize-heading1);
 	font-weight: var(--vscode-fontWeight-semiBold);
-	letter-spacing: -0.025em;
-	line-height: 1.08;
+	line-height: 1.35;
 }
-
-.codescrim-course-intro {
-	max-width: 680px;
-	margin: 20px 0 0;
+.codescrim-course-intro,
+.codescrim-home-card-description,
+.codescrim-learn-drop p {
 	color: var(--vscode-descriptionForeground);
-	font-size: 16px;
+	font-size: var(--vscode-fontSize-body1);
 	line-height: 1.6;
 }
-
-.codescrim-course-principles {
+.codescrim-home-cards {
 	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	gap: 16px;
+	grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+	gap: var(--vscode-spacing-size200);
 	margin-top: var(--vscode-spacing-size400);
 }
-
-.codescrim-course-principle,
-.codescrim-course-empty {
-	box-sizing: border-box;
-	border: 1px solid var(--vscode-widget-border);
-	border-radius: var(--vscode-cornerRadius-large);
+.codescrim-home-card {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: var(--vscode-spacing-size160);
+	padding: var(--vscode-spacing-size280);
+	text-align: left;
+	font: inherit;
+	color: inherit;
 	background: var(--vscode-editorWidget-background);
+	border: var(--vscode-strokeThickness) solid var(--vscode-widget-border, transparent);
+	border-radius: var(--vscode-cornerRadius-large);
+	cursor: pointer;
 }
-
-.codescrim-course-principle {
-	min-height: 156px;
-	padding: var(--vscode-spacing-size240);
+.codescrim-home-card:hover {
+	background: var(--vscode-list-hoverBackground);
+	border-color: var(--vscode-focusBorder);
 }
-
-.codescrim-course-principle h2,
-.codescrim-course-library h2,
-.codescrim-course-empty h3 {
-	margin: 0;
+.codescrim-home-card-title {
+	font-size: var(--vscode-fontSize-heading2);
 	font-weight: var(--vscode-fontWeight-semiBold);
 }
-
-.codescrim-course-principle h2 {
-	font-size: 16px;
+.codescrim-home-card-arrow {
+	margin-top: auto;
+	color: var(--vscode-textLink-foreground);
 }
-
-.codescrim-course-principle p,
-.codescrim-course-empty p {
-	margin: 12px 0 0;
-	color: var(--vscode-descriptionForeground);
-	line-height: 1.55;
+.codescrim-learn-drop {
+	margin: var(--vscode-spacing-size400) 0 var(--vscode-spacing-size240);
+	padding: var(--vscode-spacing-size400);
+	text-align: center;
+	border: var(--vscode-strokeThickness) dashed var(--vscode-panel-border);
+	border-radius: var(--vscode-cornerRadius-large);
 }
-
-.codescrim-course-library {
-	margin-top: var(--vscode-spacing-size400);
+.codescrim-learn-drop.drag-over {
+	background: var(--vscode-list-dropBackground);
+	border-color: var(--vscode-focusBorder);
 }
-
-.codescrim-course-library > h2 {
-	font-size: 20px;
+.codescrim-home-open,
+.codescrim-home-back {
+	padding: var(--vscode-spacing-size100) var(--vscode-spacing-size200);
+	font: inherit;
+	border: var(--vscode-strokeThickness) solid transparent;
+	border-radius: var(--vscode-cornerRadius-small);
+	cursor: pointer;
 }
-
-.codescrim-course-empty {
-	margin-top: 16px;
-	padding: 28px;
-	border-style: dashed;
+.codescrim-home-open {
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
 }
-
-.codescrim-course-empty h3 {
-	font-size: 15px;
+.codescrim-home-open:hover {
+	background: var(--vscode-button-hoverBackground);
 }
-
-.codescrim-course-empty-actions {
-	display: flex;
-	margin-top: 20px;
+.codescrim-home-back {
+	color: var(--vscode-textLink-foreground);
+	background: transparent;
 }
-
-.codescrim-course-empty-actions .monaco-button {
-	width: auto;
-	min-width: 160px;
-}
-
-@media (max-width: 760px) {
-	.codescrim-course-principles {
-		grid-template-columns: 1fr;
-	}
-
-	.codescrim-course-principle {
-		min-height: auto;
-	}
+.codescrim-course-editor button:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
 }

@@ -30,7 +30,7 @@
 	box-sizing: border-box;
 	min-width: 0;
 	padding: 4px 148px 0 8px;
-	overflow: hidden;
+	overflow-x: auto;
 	border-bottom: 1px solid var(--vscode-panel-border);
 	background: var(--vscode-titleBar-activeBackground);
 }
@@ -49,6 +49,25 @@
 	border-radius: var(--vscode-cornerRadius-medium) var(--vscode-cornerRadius-medium) 0 0;
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
+}
+
+.codescrim-browser-tab-item {
+	-webkit-app-region: no-drag;
+	display: flex;
+	align-items: center;
+	min-width: 120px;
+	max-width: 260px;
+}
+
+.codescrim-browser-tab-item .codescrim-browser-window-tab {
+	flex: 1;
+	min-width: 0;
+}
+
+.codescrim-browser-window-button:focus-visible,
+.codescrim-browser-window-tab:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: -2px;
 }
 
 .codescrim-browser-window-tab span:last-child {
@@ -165,4 +184,115 @@
 
 @keyframes codescrim-browser-spin {
 	to { transform: rotate(360deg); }
+}
+
+.codescrim-learner-browser {
+	position: absolute;
+	z-index: 100;
+	display: grid;
+	grid-template-rows: 36px 40px minmax(0, 1fr);
+	box-sizing: border-box;
+	overflow: hidden;
+	border: var(--vscode-strokeThickness) solid var(--vscode-widget-border, var(--vscode-panel-border));
+	border-radius: var(--vscode-cornerRadius-large);
+	box-shadow: 0 8px 24px var(--vscode-widget-shadow);
+	color: var(--vscode-foreground);
+	background: var(--vscode-editorWidget-background);
+}
+
+.codescrim-learner-browser[hidden],
+.codescrim-learner-browser [hidden] {
+	display: none;
+}
+
+.codescrim-learner-browser-header,
+.codescrim-learner-browser-toolbar {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	gap: var(--vscode-spacing-size80);
+	padding: 0 var(--vscode-spacing-size120);
+}
+
+.codescrim-learner-browser-header {
+	border-bottom: var(--vscode-strokeThickness) solid var(--vscode-panel-border);
+	cursor: grab;
+	touch-action: none;
+}
+
+.codescrim-learner-browser.adjusting .codescrim-learner-browser-header {
+	cursor: grabbing;
+}
+
+.codescrim-learner-browser button {
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size80);
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	color: inherit;
+	background: transparent;
+	font: inherit;
+	cursor: pointer;
+}
+
+.codescrim-learner-browser button:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.codescrim-learner-browser button:focus-visible,
+.codescrim-learner-browser-header:focus-visible,
+.codescrim-learner-browser select:focus-visible,
+.codescrim-learner-browser input:focus-visible,
+.codescrim-session-more:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: -2px;
+}
+
+.codescrim-learner-browser-title {
+	flex: 1;
+	text-align: left;
+	user-select: none;
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.codescrim-learner-browser-empty {
+	display: grid;
+	place-items: center;
+	padding: var(--vscode-spacing-size160);
+	text-align: center;
+	color: var(--vscode-descriptionForeground);
+}
+
+.codescrim-learner-browser-tabs {
+	max-width: 40%;
+	min-width: 0;
+	border: var(--vscode-strokeThickness) solid var(--vscode-dropdown-border);
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-dropdown-background);
+	color: var(--vscode-dropdown-foreground);
+	font: inherit;
+}
+
+.codescrim-learner-browser .codescrim-learner-browser-resize {
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	width: 28px;
+	height: 28px;
+	cursor: se-resize;
+	touch-action: none;
+	background: var(--vscode-editorWidget-background);
+}
+
+.codescrim-learner-browser.expanded .codescrim-learner-browser-resize {
+	display: none;
+}
+
+.codescrim-learner-browser.adjusting iframe {
+	pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.codescrim-browser-window-button.loading .codicon {
+		animation: none;
+	}
 }
