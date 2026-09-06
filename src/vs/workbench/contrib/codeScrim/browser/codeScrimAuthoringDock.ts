@@ -68,6 +68,12 @@ export class CodeScrimAuthoringDockContribution extends Disposable implements IW
 		this._register(this.recorderService.onDidChangeDraft(() => this.render()));
 		this._register(this.sessionService.onDidChangeState(() => this.updateVisibility()));
 		this._register(this.editorService.onDidActiveEditorChange(() => this.updateVisibility()));
+		this._register(DOM.addDisposableListener(mainWindow, DOM.EventType.FOCUS, () => {
+			const activeElement = mainWindow.document.activeElement;
+			if (this.isRecordingLive() && (!activeElement || activeElement === mainWindow.document.body || this.shell.contains(activeElement))) {
+				this.restoreEditorFocus();
+			}
+		}));
 
 		this.updateVisibility();
 		this.render();
@@ -149,8 +155,22 @@ export class CodeScrimAuthoringDockContribution extends Disposable implements IW
 		if (className) {
 			button.element.classList.add(`codescrim-${className}-button`);
 		}
-		this.renderDisposables.add(button.onDidClick(() => this.commandService.executeCommand(command)));
+		this.renderDisposables.add(button.onDidClick(async () => {
+			await this.commandService.executeCommand(command);
+			if (command === CODE_SCRIM_START_RECORDING_COMMAND_ID || command === CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID ||
+				command === CODE_SCRIM_RESUME_RECORDING_COMMAND_ID || command === CODE_SCRIM_STOP_RECORDING_COMMAND_ID) {
+				this.restoreEditorFocus();
+			}
+		}));
 		return button;
+	}
+
+	private isRecordingLive(): boolean {
+		return this.recorderService.state.status === 'recording' || this.recorderService.state.status === 'paused';
+	}
+
+	private restoreEditorFocus(): void {
+		mainWindow.requestAnimationFrame(() => this.editorService.activeEditorPane?.focus());
 	}
 
 	private getStateLabel(): string {

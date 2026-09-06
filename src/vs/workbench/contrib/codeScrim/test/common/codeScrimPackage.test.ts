@@ -94,7 +94,7 @@ function createDraft(): ICodeScrimRecordingDraft {
 		id: 'package-test',
 		duration: 4_000,
 		browser: {
-			snapshots: [{ timestamp: 750, pageId: 'page-1', url: 'http://localhost:3000', title: 'Lesson', scrollTop: 120, html: '<html><body>Lesson</body></html>' }],
+			snapshots: [{ timestamp: 750, pageId: 'page-1', url: 'http://localhost:3000', title: 'Lesson', scrollTop: 120, viewportWidth: 1180, viewportHeight: 700, html: '<html><body>Lesson</body></html>' }],
 			visibility: [{ timestamp: 500, pageId: 'page-1', visible: true }, { timestamp: 2_500, pageId: 'page-1', visible: false }],
 			scrolls: [{ timestamp: 800, pageId: 'page-1', scrollLeft: 0, scrollTop: 180 }],
 			pages: [{ timestamp: 450, pageId: 'page-1', kind: 'opened' }, { timestamp: 500, pageId: 'page-1', kind: 'activated' }],

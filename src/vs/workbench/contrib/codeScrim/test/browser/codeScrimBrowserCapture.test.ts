@@ -32,9 +32,9 @@ suite('CodeScrimBrowserCapture', () => {
 			override readonly onDidScroll = Event.None;
 			override readonly onDidChangeLoadingState = Event.None;
 			override readonly onDidClose = Event.None;
-			override async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string }> {
+			override async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string; viewportWidth: number; viewportHeight: number }> {
 				domCaptureCount++;
-				return { html: '<html><body><button>Open</button></body></html>', scrollY: 20, title: this.title, url: this.url };
+				return { html: '<html><body><button>Open</button></body></html>', scrollY: 20, title: this.title, url: this.url, viewportWidth: 1180, viewportHeight: 700 };
 			}
 		}();
 		const browserService = new class extends mock<ICodeScrimBrowserWindowService>() {
@@ -52,6 +52,7 @@ suite('CodeScrimBrowserCapture', () => {
 			url: track?.snapshots[0]?.url,
 			interactiveDom: track?.snapshots[0]?.html.includes('<button>Open</button>'),
 			scrollTop: track?.snapshots[0]?.scrollTop,
-		}, { domCaptureCount: 2, url: model.url, interactiveDom: true, scrollTop: 20 });
+			viewport: [track?.snapshots[0]?.viewportWidth, track?.snapshots[0]?.viewportHeight],
+		}, { domCaptureCount: 2, url: model.url, interactiveDom: true, scrollTop: 20, viewport: [1180, 700] });
 	});
 });

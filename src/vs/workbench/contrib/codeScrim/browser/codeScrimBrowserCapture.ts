@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { disposableTimeout, Limiter, ThrottledDelayer } from '../../../../base/common/async.js';
+import { disposableTimeout, Limiter, raceTimeout, ThrottledDelayer } from '../../../../base/common/async.js';
 import { addDisposableListener } from '../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 import { hash } from '../../../../base/common/hash.js';
@@ -16,8 +16,11 @@ import { ICodeScrimBrowserWindowService } from './codeScrimBrowserWindowService.
 const SNAPSHOT_SETTLE_DELAY_MS = 500;
 const POST_LOAD_CAPTURE_DELAYS_MS = [750, 2000] as const;
 const SNAPSHOT_MAX_PENDING = 1;
-const SNAPSHOT_MIN_INTERVAL_MS = 1000;
+const SNAPSHOT_MIN_INTERVAL_MS = 2000;
 const SNAPSHOT_MAX_HTML_LENGTH = 16 * 1024 * 1024;
+const SNAPSHOT_MAX_TOTAL_HTML_LENGTH = 64 * 1024 * 1024;
+const SNAPSHOT_MAX_COUNT = 1000;
+const SNAPSHOT_TIMEOUT_MS = 3000;
 
 /**
  * Records the instructor Integrated Browser as serialized DOM states plus page
@@ -37,6 +40,8 @@ export class CodeScrimBrowserCapture extends Disposable {
 	private readonly lastSnapshotHash = new Map<string, number>();
 	private readonly lastScroll = new Map<string, { readonly left: number; readonly top: number }>();
 	private readonly lastSnapshotRequestedAt = new Map<string, number>();
+	private readonly disabledSnapshotPages = new Set<string>();
+	private totalHtmlLength = 0;
 	private position: (() => number) | undefined;
 	private active = false;
 	private generation = 0;
@@ -128,6 +133,8 @@ export class CodeScrimBrowserCapture extends Disposable {
 		this.lastSnapshotHash.clear();
 		this.lastScroll.clear();
 		this.lastSnapshotRequestedAt.clear();
+		this.disabledSnapshotPages.clear();
+		this.totalHtmlLength = 0;
 	}
 
 	private attachKnownPages(): void {
@@ -221,7 +228,7 @@ export class CodeScrimBrowserCapture extends Disposable {
 	}
 
 	private captureSnapshot(model: IBrowserViewModel, delayer: ThrottledDelayer<void>): void {
-		if (!this.active || !model.visible) {
+		if (!this.active || !model.visible || this.disabledSnapshotPages.has(model.id) || this.events.length >= SNAPSHOT_MAX_COUNT) {
 			return;
 		}
 		const now = this.position?.() ?? 0;
@@ -236,33 +243,55 @@ export class CodeScrimBrowserCapture extends Disposable {
 	}
 
 	private async captureSnapshotNow(model: IBrowserViewModel, generation: number | undefined, timestamp: number): Promise<void> {
+		if (this.disabledSnapshotPages.has(model.id) || this.events.length >= SNAPSHOT_MAX_COUNT) {
+			return;
+		}
 		try {
-			const snapshot = await model.captureDomSnapshot();
+			let timedOut = false;
+			const snapshot = await raceTimeout(model.captureDomSnapshot(), SNAPSHOT_TIMEOUT_MS, () => timedOut = true);
 			if (!snapshot || (generation !== undefined && generation !== this.generation)) {
+				if (timedOut && (generation === undefined || generation === this.generation)) {
+					this.disablePageCapture(model.id, 'the page did not produce a DOM snapshot within the capture deadline');
+				}
 				return;
 			}
 			if (snapshot.html.length > SNAPSHOT_MAX_HTML_LENGTH) {
-				this.logService.warn(`[CodeScrim] Skipped an oversized browser DOM snapshot (${snapshot.html.length} characters).`);
+				this.disablePageCapture(model.id, `a DOM snapshot exceeded ${SNAPSHOT_MAX_HTML_LENGTH} characters`);
+				return;
+			}
+			if (this.totalHtmlLength + snapshot.html.length > SNAPSHOT_MAX_TOTAL_HTML_LENGTH) {
+				this.disablePageCapture(model.id, `the recording reached its ${SNAPSHOT_MAX_TOTAL_HTML_LENGTH} character browser snapshot budget`);
 				return;
 			}
 			const scrollTop = Math.max(0, Math.round(snapshot.scrollY));
 			this.recordScroll(model.id, 0, snapshot.scrollY, timestamp);
-			const dataHash = hash(`${snapshot.url}\0${snapshot.title}\0${snapshot.html}`);
+			const dataHash = hash(`${snapshot.url}\0${snapshot.title}\0${snapshot.viewportWidth ?? 0}x${snapshot.viewportHeight ?? 0}\0${snapshot.html}`);
 			if (this.lastSnapshotHash.get(model.id) === dataHash) {
 				return;
 			}
 			this.lastSnapshotHash.set(model.id, dataHash);
+			this.totalHtmlLength += snapshot.html.length;
 			this.events.push(Object.freeze({
 				timestamp,
 				pageId: model.id,
 				url: snapshot.url,
 				title: snapshot.title,
 				scrollTop,
+				...(snapshot.viewportWidth ? { viewportWidth: Math.round(snapshot.viewportWidth) } : {}),
+				...(snapshot.viewportHeight ? { viewportHeight: Math.round(snapshot.viewportHeight) } : {}),
 				html: snapshot.html,
 			}));
 		} catch (error) {
 			this.logService.warn('[CodeScrim] Could not capture an Integrated Browser DOM snapshot.', error);
 		}
+	}
+
+	private disablePageCapture(pageId: string, reason: string): void {
+		if (this.disabledSnapshotPages.has(pageId)) {
+			return;
+		}
+		this.disabledSnapshotPages.add(pageId);
+		this.logService.warn(`[CodeScrim] Stopped passive DOM capture for browser page ${pageId}: ${reason}.`);
 	}
 
 	private recordScroll(pageId: string, scrollLeft: number, scrollTop: number, timestamp = this.position?.() ?? 0): void {

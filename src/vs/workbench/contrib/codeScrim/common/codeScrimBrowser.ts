@@ -21,6 +21,9 @@ export interface ICodeScrimBrowserSnapshot {
 	readonly title: string;
 	/** Vertical scroll offset in CSS pixels when the snapshot was taken. */
 	readonly scrollTop: number;
+	/** Instructor viewport used to preserve responsive layout during replay. */
+	readonly viewportWidth?: number;
+	readonly viewportHeight?: number;
 	/** Serialized document, scripts removed. Rendered in a sandboxed iframe at replay. */
 	readonly html: string;
 }
@@ -61,6 +64,8 @@ export interface ICodeScrimBrowserPageState {
 	readonly url: string;
 	readonly title: string;
 	readonly active: boolean;
+	/** Timestamp of the latest instructor activation when this is the active tab. */
+	readonly activeAt?: number;
 	/** Latest captured state for this tab at the current lesson position. */
 	readonly snapshot?: ICodeScrimBrowserSnapshot;
 	readonly scrollTop?: number;
@@ -86,6 +91,7 @@ export function findCodeScrimBrowserPages(track: ICodeScrimBrowserTrack | undefi
 	}
 	const open = new Map<string, { url: string; title: string; timestamp: number }>();
 	let activePageId: string | undefined;
+	let activePageTimestamp: number | undefined;
 	for (const event of track.pages) {
 		if (event.timestamp > position) {
 			break;
@@ -98,11 +104,13 @@ export function findCodeScrimBrowserPages(track: ICodeScrimBrowserTrack | undefi
 				open.delete(event.pageId);
 				if (activePageId === event.pageId) {
 					activePageId = undefined;
+					activePageTimestamp = undefined;
 				}
 				break;
 			case 'activated':
 				if (open.has(event.pageId)) {
 					activePageId = event.pageId;
+					activePageTimestamp = event.timestamp;
 				}
 				break;
 			case 'updated': {
@@ -122,6 +130,7 @@ export function findCodeScrimBrowserPages(track: ICodeScrimBrowserTrack | undefi
 			url: snapshotIsNewer ? snapshot.url : page.url || snapshot?.url || 'about:blank',
 			title: snapshotIsNewer ? snapshot.title : page.title || snapshot?.title || '',
 			active: pageId === activePageId,
+			...(pageId === activePageId && activePageTimestamp !== undefined ? { activeAt: activePageTimestamp } : {}),
 			...(snapshot ? {
 				snapshot,
 				scrollTop: findCodeScrimBrowserScroll(track, position, pageId)?.scrollTop ?? snapshot.scrollTop,
@@ -170,7 +179,11 @@ export function findCodeScrimBrowserSnapshot(track: ICodeScrimBrowserTrack | und
 	if (!track) {
 		return undefined;
 	}
-	const pageId = findCodeScrimVisiblePage(track, position);
+	// Tab activation is synchronous and ordered. Visibility updates come from the
+	// asynchronously hosted BrowserView and can lag behind a tab click, so they
+	// must never override the instructor's explicit active-tab event.
+	const activePageId = findCodeScrimActivePage(track, position);
+	const pageId = activePageId ?? findCodeScrimVisiblePage(track, position);
 	const index = findLastTimestamp(track.snapshots, position);
 	let fallback: ICodeScrimBrowserSnapshot | undefined;
 	for (let candidate = index; candidate >= 0; candidate--) {
@@ -180,7 +193,10 @@ export function findCodeScrimBrowserSnapshot(track: ICodeScrimBrowserTrack | und
 			return snapshot;
 		}
 	}
-	return fallback;
+	// When activation is known but that tab has no captured DOM yet, showing a
+	// different tab is actively misleading. Older recordings without page events
+	// retain the historical visibility-based fallback.
+	return activePageId ? undefined : fallback;
 }
 
 /** Resolves the latest viewport position of the page visible at a timeline position. */
@@ -235,6 +251,27 @@ function findLastTimestamp(entries: readonly { readonly timestamp: number }[], p
 		}
 	}
 	return result;
+}
+
+function findCodeScrimActivePage(track: ICodeScrimBrowserTrack, position: number): string | undefined {
+	let activePageId: string | undefined;
+	const openPages = new Set<string>();
+	for (const event of track.pages) {
+		if (event.timestamp > position) {
+			break;
+		}
+		if (event.kind === 'opened') {
+			openPages.add(event.pageId);
+		} else if (event.kind === 'closed') {
+			openPages.delete(event.pageId);
+			if (activePageId === event.pageId) {
+				activePageId = undefined;
+			}
+		} else if (event.kind === 'activated' && openPages.has(event.pageId)) {
+			activePageId = event.pageId;
+		}
+	}
+	return activePageId;
 }
 
 function findLatestPageSnapshot(snapshots: readonly ICodeScrimBrowserSnapshot[], position: number, pageId: string): ICodeScrimBrowserSnapshot | undefined {

@@ -127,8 +127,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 		this.browserActiveContext = CodeScrimInstructorBrowserActiveContext.bindTo(contextKeyService);
 		this.terminalActiveContext = CodeScrimInstructorTerminalActiveContext.bindTo(contextKeyService);
 		this._register({ dispose: () => {
-			this.browserActiveContext.reset();
-			this.terminalActiveContext.reset();
+			this.setTeachingSurface(undefined);
 		} });
 		this._register(this.sessionService.onDidChangeState(state => this.renderState(state)));
 		this._register(this.replayService.onDidChangeState(state => this.renderReplayState(state)));
@@ -168,8 +167,7 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 
 	override setVisible(visible: boolean): void {
 		if (!visible) {
-			this.browserActiveContext.reset();
-			this.terminalActiveContext.reset();
+			this.setTeachingSurface(undefined);
 			if (this.replayService.state.status !== 'idle') {
 				this.replayService.stop();
 			}
@@ -289,9 +287,17 @@ export class CodeScrimLessonEditor extends EditorPane implements ICodeScrimRepla
 	}
 
 	showBrowserSnapshot(snapshot: ICodeScrimBrowserSnapshot | undefined, scrollTop = snapshot?.scrollTop ?? 0, pages?: readonly ICodeScrimBrowserPageState[], activeSurface?: ICodeScrimBrowserSurfaceEvent, teachingSurface?: CodeScrimTeachingSurface): void {
-		this.browserActiveContext.set(teachingSurface === 'browser');
-		this.terminalActiveContext.set(teachingSurface === 'terminal');
+		this.setTeachingSurface(teachingSurface);
 		this.browserWindowService.showLearnerSnapshot(snapshot, scrollTop, pages, activeSurface);
+	}
+
+	private setTeachingSurface(teachingSurface: CodeScrimTeachingSurface | undefined): void {
+		const browserActive = teachingSurface === 'browser';
+		const terminalActive = teachingSurface === 'terminal';
+		this.browserActiveContext.set(browserActive);
+		this.terminalActiveContext.set(terminalActive);
+		mainWindow.document.body.classList.toggle('codescrim-instructor-browser-active', browserActive);
+		mainWindow.document.body.classList.toggle('codescrim-instructor-terminal-active', terminalActive);
 	}
 
 	clear(preserveBrowser = false): void {

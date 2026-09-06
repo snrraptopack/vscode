@@ -61,6 +61,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	private learnerExperimentSequence = 0;
 	private replayActiveResource: ICodeScrimWorkspaceResource | undefined;
 	private pendingActiveResource: ICodeScrimWorkspaceResource | undefined;
+	private pendingWorkspaceProjection: Promise<void> = Promise.resolve();
 	private readonly _onDidChangeState = this._register(new Emitter<CodeScrimReplayState>());
 	readonly onDidChangeState = this._onDidChangeState.event;
 	private readonly _onDidChangeWorkspace = this._register(new Emitter<void>());
@@ -783,7 +784,7 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 	private async applyEvent(event: CodeScrimRecordingEvent, operation: number, allowConflict: boolean): Promise<boolean> {
 		switch (event.kind) {
 			case 'workspace.entriesChanged':
-				await this.applyWorkspaceChanges(event.payload.deleted, event.payload.created, operation);
+				await this.applyWorkspaceChanges(event.payload.deleted, event.payload.created, operation, !allowConflict);
 				break;
 			case 'editor.activeResourceChanged':
 				if (event.payload.resource) {
@@ -1087,18 +1088,13 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 		this.publishLearnerState();
 	}
 
-	private async applyWorkspaceChanges(deleted: readonly ICodeScrimWorkspaceResource[], created: readonly ICodeScrimWorkspaceEntryCheckpoint[], operation: number): Promise<void> {
+	private async applyWorkspaceChanges(deleted: readonly ICodeScrimWorkspaceResource[], created: readonly ICodeScrimWorkspaceEntryCheckpoint[], operation: number, waitForProjection: boolean): Promise<void> {
 		for (const resource of deleted) {
 			await this.removeResourceTree(resource);
 			if (!this.isCurrentOperation(operation)) {
 				return;
 			}
 		}
-		await this.learnerWorkspaceService.applyWorkspaceChanges(deleted, created);
-		if (!this.isCurrentOperation(operation)) {
-			return;
-		}
-
 		const draft = this.activeDraft;
 		if (!draft) {
 			return;
@@ -1124,6 +1120,12 @@ export class CodeScrimReplayService extends Disposable implements ICodeScrimRepl
 			await this.showResource(this.pendingActiveResource, operation);
 		}
 		this._onDidChangeWorkspace.fire();
+
+		const projection = this.pendingWorkspaceProjection.then(() => this.learnerWorkspaceService.applyWorkspaceChanges(deleted, created));
+		this.pendingWorkspaceProjection = projection.catch(onUnexpectedError);
+		if (waitForProjection) {
+			await projection;
+		}
 	}
 
 	private async removeResourceTree(resource: ICodeScrimWorkspaceResource): Promise<void> {

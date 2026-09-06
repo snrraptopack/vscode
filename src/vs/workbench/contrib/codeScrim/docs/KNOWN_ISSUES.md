@@ -7,7 +7,7 @@ it.
 
 ## Recording keyboard commands
 
-**Status:** Open, high priority.
+**Status:** Fix implemented; awaiting manual regression verification.
 
 While recording, normal editor commands can stop reaching the active editor.
 The problem was first observed with `Ctrl+S`, but `Ctrl+Z` is also affected. This
@@ -25,9 +25,13 @@ Acceptance criteria:
 - Automated coverage exercises at least save, undo, and redo through the actual
   keybinding dispatch path while recording is active.
 
+Implementation note: CodeScrim no longer registers a higher-priority `Ctrl+S`
+command. Recording-control actions restore focus to the active editor, leaving
+save, undo, redo, and other shortcuts on the normal workbench dispatch path.
+
 ## Teaching-surface activity indicators
 
-**Status:** Open.
+**Status:** Fix implemented; awaiting visual verification.
 
 The learner needs a visible cue when the instructor is currently using the
 browser or terminal, especially when the learner has hidden that surface. The
@@ -43,9 +47,13 @@ Acceptance criteria:
 - Editor activity clears both cues, and reduced-motion mode keeps a static cue.
 - The behavior is visually verified in light, dark, and high-contrast themes.
 
+Implementation note: replay now mirrors the teaching surface to explicit
+workbench DOM state as well as context keys, so title-bar glow styling does not
+depend on scoped menu context propagation. Reduced-motion mode remains static.
+
 ## Recorded browser tab activation
 
-**Status:** Open, high priority.
+**Status:** Fix implemented; awaiting manual regression verification.
 
 External navigation can create the recorded tab and the learner can see tab
 metadata, but replay does not reliably show the instructor switching between
@@ -63,9 +71,13 @@ Acceptance criteria:
   timeline; the next instructor activation returns playback to the recorded tab.
 - Seeking and restarting reconstruct the same open, closed, and active tab set.
 
+Implementation note: ordered `activated` events are authoritative over delayed
+BrowserView visibility events. Activation timestamps also dismiss a learner's
+temporary tab selection on the instructor's next activation.
+
 ## Replay continuity
 
-**Status:** Needs manual regression verification.
+**Status:** Fix implemented; awaiting manual regression verification.
 
 Playback has previously stopped at a repeatable interaction and only continued
 after manually dragging the timeline and pressing Continue. Recorded save I/O
@@ -80,9 +92,13 @@ Acceptance criteria:
 - A stalled or failed event is diagnosed visibly instead of leaving a playing UI
   frozen at one position.
 
+Implementation note: recorded workspace changes update the authoritative
+in-memory replay immediately. Disk projection remains serialized but no longer
+blocks the live playback tick.
+
 ## External-page fidelity and stability
 
-**Status:** Needs manual regression verification.
+**Status:** Fix implemented; awaiting manual regression verification.
 
 External pages have shown incorrect large blank/black regions and browser-heavy
 recordings have made the development window unresponsive. Whole-page screenshot
@@ -100,3 +116,7 @@ Acceptance criteria:
 - Unsupported cross-origin, canvas, media, or closed-shadow content is identified
   as a bounded fallback region rather than silently distorting the whole page.
 
+Implementation note: new snapshots retain the instructor viewport for responsive
+layout fidelity. Capture now has a timeout, per-snapshot limit, total-HTML budget,
+and event-count ceiling; an abusive page is disabled for further passive capture
+without stopping the interactive recording.

@@ -6,7 +6,6 @@
 import { Codicon } from '../../../../base/common/codicons.js';
 import * as DOM from '../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../base/browser/window.js';
-import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Schemas } from '../../../../base/common/network.js';
@@ -15,7 +14,6 @@ import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/c
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
-import { KeybindingWeight, KeybindingsRegistry } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
@@ -23,12 +21,12 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/editor.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { ActiveEditorContext } from '../../../common/contextkeys.js';
-import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer, SaveReason } from '../../../common/editor.js';
+import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { CODE_SCRIM_OPEN_AUTHOR_BROWSER_COMMAND_ID, CODE_SCRIM_OPEN_LEARNER_BROWSER_COMMAND_ID, CODE_SCRIM_TOGGLE_LESSON_BROWSER_COMMAND_ID } from '../common/codeScrimBrowser.js';
 import { CODE_SCRIM_OPEN_RECORDING_COMMAND_ID, CODE_SCRIM_PACKAGE_EXTENSION, CODE_SCRIM_SAVE_RECORDING_COMMAND_ID, ICodeScrimPackageService } from '../common/codeScrimPackage.js';
-import { CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, CodeScrimRecordingActiveContext, ICodeScrimRecorderService, ICodeScrimRecordingDraft } from '../common/codeScrimRecording.js';
+import { CODE_SCRIM_DISCARD_RECORDING_COMMAND_ID, CODE_SCRIM_PAUSE_RECORDING_COMMAND_ID, CODE_SCRIM_RESUME_RECORDING_COMMAND_ID, CODE_SCRIM_START_RECORDING_COMMAND_ID, CODE_SCRIM_STOP_RECORDING_COMMAND_ID, ICodeScrimRecorderService, ICodeScrimRecordingDraft } from '../common/codeScrimRecording.js';
 import { CODE_SCRIM_REPLAY_LAST_RECORDING_COMMAND_ID, CODE_SCRIM_RESTART_REPLAY_COMMAND_ID, CODE_SCRIM_RESUME_REPLAY_COMMAND_ID, CODE_SCRIM_STOP_REPLAY_COMMAND_ID, CodeScrimInstructorBrowserActiveContext, CodeScrimInstructorTerminalActiveContext, ICodeScrimReplayService } from '../common/codeScrimReplay.js';
 import { ICodeScrimLearnerWorkspaceService } from '../common/codeScrimLearnerWorkspace.js';
 import { CODE_SCRIM_OPEN_COURSE_HOME_COMMAND_ID, CODE_SCRIM_OPEN_DEMO_LESSON_COMMAND_ID, ICodeScrimLayoutService, ICodeScrimLessonDescriptor, ICodeScrimSessionService } from '../common/codeScrimSession.js';
@@ -52,21 +50,6 @@ registerSingleton(ICodeScrimPackageService, CodeScrimPackageService, Instantiati
 registerSingleton(ICodeScrimRecorderService, CodeScrimRecorderService, InstantiationType.Eager);
 registerSingleton(ICodeScrimReplayService, CodeScrimReplayService, InstantiationType.Delayed);
 registerSingleton(ICodeScrimBrowserWindowService, CodeScrimBrowserWindowService, InstantiationType.Delayed);
-
-KeybindingsRegistry.registerCommandAndKeybindingRule({
-	id: 'codescrim.saveActiveEditorWhileRecording',
-	weight: KeybindingWeight.WorkbenchContrib + 100,
-	when: CodeScrimRecordingActiveContext,
-	primary: KeyMod.CtrlCmd | KeyCode.KeyS,
-	handler: accessor => {
-		const editorService = accessor.get(IEditorService);
-		const pane = editorService.activeEditorPane;
-		if (!pane?.input) {
-			return;
-		}
-		return editorService.save({ editor: pane.input, groupId: pane.group.id }, { reason: SaveReason.EXPLICIT, force: true });
-	},
-});
 
 let codeScrimStartupCover: HTMLElement | undefined;
 

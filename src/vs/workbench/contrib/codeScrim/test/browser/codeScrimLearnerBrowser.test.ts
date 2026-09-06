@@ -121,7 +121,7 @@ suite('CodeScrimLearnerBrowser', () => {
 		};
 		browser.show(second, 0, [
 			{ pageId: snapshot.pageId, url: snapshot.url, title: snapshot.title, active: false, snapshot, scrollTop: 0 },
-			{ pageId: second.pageId, url: second.url, title: second.title, active: true, snapshot: second, scrollTop: 0 },
+			{ pageId: second.pageId, url: second.url, title: second.title, active: true, activeAt: 10, snapshot: second, scrollTop: 0 },
 		]);
 		const tabs = panel.querySelectorAll<HTMLButtonElement>('.codescrim-learner-browser-tab');
 		assert.strictEqual(tabs.length, 2);
@@ -130,5 +130,10 @@ suite('CodeScrimLearnerBrowser', () => {
 		assert.strictEqual(panel.querySelector('input')!.value, snapshot.url);
 		assert.strictEqual(tabs[0].classList.contains('active'), false); // The tab strip was rerendered.
 		assert.strictEqual(panel.querySelector<HTMLButtonElement>('.codescrim-learner-browser-tab')!.classList.contains('active'), true);
+		browser.show(second, 0, [
+			{ pageId: snapshot.pageId, url: snapshot.url, title: snapshot.title, active: false, snapshot, scrollTop: 0 },
+			{ pageId: second.pageId, url: second.url, title: second.title, active: true, activeAt: 20, snapshot: second, scrollTop: 0 },
+		]);
+		assert.strictEqual(panel.querySelector('input')!.value, second.url);
 	});
 });

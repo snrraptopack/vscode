@@ -323,7 +323,7 @@ function init() {
 		 * Runs in the isolated world, so page scripts cannot tamper with the
 		 * serialization functions themselves.
 		 */
-		async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined> {
+		async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string; viewportWidth: number; viewportHeight: number } | undefined> {
 			try {
 				const clone = document.documentElement.cloneNode(true) as HTMLElement;
 				const sourceElements = document.documentElement.querySelectorAll('*');
@@ -380,6 +380,8 @@ function init() {
 					scrollY: window.scrollY || 0,
 					title: document.title,
 					url: location.href,
+					viewportWidth: Math.max(1, window.innerWidth),
+					viewportHeight: Math.max(1, window.innerHeight),
 				};
 			} catch {
 				return undefined;

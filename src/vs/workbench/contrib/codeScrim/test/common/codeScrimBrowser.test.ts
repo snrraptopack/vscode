@@ -84,13 +84,38 @@ suite('CodeScrimBrowser', () => {
 		assert.strictEqual(findCodeScrimVisiblePage(partial, 25), undefined);
 	});
 
+	test('uses ordered tab activation while BrowserView visibility is delayed', () => {
+		const delayedVisibility: ICodeScrimBrowserTrack = {
+			snapshots: [
+				{ timestamp: 100, pageId: 'two', url: 'https://two', title: 'Two', scrollTop: 0, html: '<html>two</html>' },
+				{ timestamp: 200, pageId: 'one', url: 'https://one', title: 'One', scrollTop: 0, html: '<html>one</html>' },
+			],
+			visibility: [
+				{ timestamp: 150, pageId: 'one', visible: true },
+				{ timestamp: 350, pageId: 'one', visible: false },
+				{ timestamp: 350, pageId: 'two', visible: true },
+			],
+			scrolls: [],
+			pages: [
+				{ timestamp: 0, pageId: 'one', kind: 'opened' },
+				{ timestamp: 0, pageId: 'two', kind: 'opened' },
+				{ timestamp: 150, pageId: 'one', kind: 'activated' },
+				{ timestamp: 300, pageId: 'two', kind: 'activated' },
+			],
+			surfaces: [],
+		};
+
+		assert.strictEqual(findCodeScrimVisiblePage(delayedVisibility, 320), 'one');
+		assert.strictEqual(findCodeScrimBrowserSnapshot(delayedVisibility, 320)?.pageId, 'two');
+	});
+
 	test('resolves tab structure and active teaching surface', () => {
 		assert.deepStrictEqual(findCodeScrimBrowserPages(track, 200), [
-			{ pageId: 'one', url: 'http://one', title: 'One', active: true, snapshot: track.snapshots[0], scrollTop: 20 },
+			{ pageId: 'one', url: 'http://one', title: 'One', active: true, activeAt: 50, snapshot: track.snapshots[0], scrollTop: 20 },
 		]);
 		assert.deepStrictEqual(findCodeScrimBrowserPages(track, 600), [
 			{ pageId: 'one', url: 'http://one', title: 'One', active: false, snapshot: track.snapshots[1], scrollTop: 220 },
-			{ pageId: 'two', url: 'http://two', title: 'Two', active: true, snapshot: track.snapshots[2], scrollTop: 80 },
+			{ pageId: 'two', url: 'http://two', title: 'Two', active: true, activeAt: 450, snapshot: track.snapshots[2], scrollTop: 80 },
 		]);
 		assert.strictEqual(findCodeScrimActiveSurface(track, 425)?.surface, 'workbench');
 		assert.strictEqual(findCodeScrimActiveSurface(track, 600)?.pageId, 'two');
