@@ -74,7 +74,6 @@ export class CodeScrimAuthoringDockContribution extends Disposable implements IW
 				this.restoreEditorFocus();
 			}
 		}));
-
 		this.updateVisibility();
 		this.render();
 		void this.recorderService.initialize().finally(() => this.render());

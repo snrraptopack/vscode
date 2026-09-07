@@ -17,7 +17,6 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 	private readonly hostDisposables = this._register(new MutableDisposable<DisposableStore>());
 	private host: HTMLElement | undefined;
 	private panel: HTMLElement | undefined;
-	private viewport: HTMLElement | undefined;
 	private frame: HTMLIFrameElement | undefined;
 	private address: HTMLInputElement | undefined;
 	private tabs: HTMLElement | undefined;
@@ -82,10 +81,9 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 		this.address = DOM.append(toolbar, DOM.$('input.codescrim-browser-window-address', {
 			type: 'text', readonly: 'true', 'aria-label': localize('codeScrim.recordedAddress', "Recorded page address"),
 		}));
-		this.viewport = DOM.append(panel, DOM.$('div.codescrim-learner-browser-viewport'));
-		this.emptyState = DOM.append(this.viewport, DOM.$('div.codescrim-learner-browser-empty', undefined,
+		this.emptyState = DOM.append(panel, DOM.$('div.codescrim-learner-browser-empty', undefined,
 			localize('codeScrim.noBrowserFrame', "No recorded browser page at this point in the lesson.")));
-		this.frame = DOM.append(this.viewport, DOM.$('iframe.codescrim-browser-window-frame', {
+		this.frame = DOM.append(panel, DOM.$('iframe.codescrim-browser-window-frame', {
 			title: localize('codeScrim.recordedBrowserFrameTitle', "Recorded instructor page"),
 		}));
 		this.frame.sandbox.add('allow-same-origin');
@@ -109,7 +107,6 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 				this.hostDisposables.clear();
 				this.host = undefined;
 				this.panel = undefined;
-				this.viewport = undefined;
 				this.frame = undefined;
 				this.address = undefined;
 				this.tabs = undefined;
@@ -200,7 +197,6 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 		const bounds = this.expanded ? { x: 0, y: 0, width: this.host.clientWidth, height: this.host.clientHeight } : this.bounds;
 		Object.assign(this.panel.style, { left: bounds.x + 'px', top: bounds.y + 'px', width: bounds.width + 'px', height: bounds.height + 'px' });
 		this.panel.classList.toggle('expanded', this.expanded);
-		this.layoutReplayViewport();
 		if (this.expandButton) {
 			this.expandButton.textContent = this.expanded ? localize('codeScrim.restoreBrowserSize', "Restore Size") : localize('codeScrim.expandBrowser', "Expand");
 			this.expandButton.setAttribute('aria-pressed', String(this.expanded));
@@ -274,34 +270,11 @@ export class CodeScrimLearnerBrowserWindow extends Disposable {
 				return;
 			}
 			this.renderedSnapshot = renderedSnapshot;
-			this.layoutReplayViewport(renderedSnapshot);
 		}
 		if (changed || this.renderedScrollTop !== renderedScrollTop) {
 			this.renderedScrollTop = renderedScrollTop;
 			this.frame.contentWindow?.scrollTo(0, renderedScrollTop);
 		}
-	}
-
-	private layoutReplayViewport(snapshot = this.renderedSnapshot ?? this.snapshot): void {
-		if (!this.viewport || !this.frame) {
-			return;
-		}
-		const viewportWidth = snapshot?.viewportWidth;
-		const viewportHeight = snapshot?.viewportHeight;
-		if (!viewportWidth || !viewportHeight || !this.viewport.clientWidth || !this.viewport.clientHeight) {
-			Object.assign(this.frame.style, { left: '0', top: '0', width: '100%', height: '100%', transform: '' });
-			return;
-		}
-		const scale = Math.min(this.viewport.clientWidth / viewportWidth, this.viewport.clientHeight / viewportHeight);
-		const renderedWidth = viewportWidth * scale;
-		const renderedHeight = viewportHeight * scale;
-		Object.assign(this.frame.style, {
-			left: `${Math.max(0, (this.viewport.clientWidth - renderedWidth) / 2)}px`,
-			top: `${Math.max(0, (this.viewport.clientHeight - renderedHeight) / 2)}px`,
-			width: `${viewportWidth}px`,
-			height: `${viewportHeight}px`,
-			transform: `scale(${scale})`,
-		});
 	}
 
 	private renderTabs(renderedPageId: string | undefined): void {

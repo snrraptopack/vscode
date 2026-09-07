@@ -437,7 +437,7 @@ export interface IBrowserViewModel extends IDisposable {
 	 * Serialize the current DOM state of the page for passive replay.
 	 * Returns undefined when the page is loading or the frame is gone.
 	 */
-	captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string; viewportWidth?: number; viewportHeight?: number } | undefined>;
+	captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined>;
 	clearStorage(): Promise<void>;
 	setOwner(owner: IBrowserViewOwner): Promise<void>;
 	setSharedWithAgent(shared: boolean): Promise<IBrowserViewModel | undefined>;
@@ -831,7 +831,7 @@ export class BrowserViewModel extends Disposable implements IBrowserViewModel {
 		return this.browserViewService.getSelectedText(this.id);
 	}
 
-	async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string; viewportWidth?: number; viewportHeight?: number } | undefined> {
+	async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined> {
 		return this.browserViewService.captureDomSnapshot(this.id);
 	}
 

@@ -340,7 +340,7 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
 		return this._getBrowserView(id).getSelectedText();
 	}
 
-	async captureDomSnapshot(id: string): Promise<{ html: string; scrollY: number; title: string; url: string; viewportWidth?: number; viewportHeight?: number } | undefined> {
+	async captureDomSnapshot(id: string): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined> {
 		return this._getBrowserView(id).captureDomSnapshot();
 	}
 

@@ -273,8 +273,6 @@ export class CodeScrimPackageCodec {
 				url: snapshot.url,
 				title: snapshot.title,
 				scrollTop: snapshot.scrollTop,
-				viewportWidth: snapshot.viewportWidth,
-				viewportHeight: snapshot.viewportHeight,
 				htmlBlob: await storeBlob(VSBuffer.fromString(snapshot.html).buffer),
 			}))),
 		} : undefined;
@@ -388,8 +386,6 @@ export class CodeScrimPackageCodec {
 					url: snapshot.url,
 					title: snapshot.title,
 					scrollTop: snapshot.scrollTop,
-					...(snapshot.viewportWidth ? { viewportWidth: snapshot.viewportWidth } : {}),
-					...(snapshot.viewportHeight ? { viewportHeight: snapshot.viewportHeight } : {}),
 					html: (await readBlob(snapshot.htmlBlob)).toString(),
 				});
 			}
@@ -499,8 +495,6 @@ function parsePayload(candidate: unknown): ICodeScrimPackagePayload {
 		for (const snapshot of candidate.manifest.browser.snapshots) {
 			if (!isRecord(snapshot) || !isSafeInteger(snapshot.timestamp) || snapshot.timestamp < 0 || !isNonEmptyString(snapshot.pageId) ||
 				!isNonEmptyString(snapshot.url) || typeof snapshot.title !== 'string' || !isSafeInteger(snapshot.scrollTop) || snapshot.scrollTop < 0 ||
-				(snapshot.viewportWidth !== undefined && !isPositiveInteger(snapshot.viewportWidth)) ||
-				(snapshot.viewportHeight !== undefined && !isPositiveInteger(snapshot.viewportHeight)) ||
 				!isNonEmptyString(snapshot.htmlBlob)) {
 				throw new Error('The CodeScrim browser index is invalid.');
 			}
@@ -637,9 +631,7 @@ function validateDraft(draft: ICodeScrimRecordingDraft): void {
 		for (const snapshot of draft.browser.snapshots) {
 			if (!isSafeInteger(snapshot.timestamp) || snapshot.timestamp < previousSnapshotTimestamp || snapshot.timestamp > draft.duration ||
 				!isNonEmptyString(snapshot.pageId) || !isNonEmptyString(snapshot.url) || typeof snapshot.title !== 'string' ||
-				!isSafeInteger(snapshot.scrollTop) || snapshot.scrollTop < 0 ||
-				(snapshot.viewportWidth !== undefined && !isPositiveInteger(snapshot.viewportWidth)) ||
-				(snapshot.viewportHeight !== undefined && !isPositiveInteger(snapshot.viewportHeight)) || !isNonEmptyString(snapshot.html)) {
+				!isSafeInteger(snapshot.scrollTop) || snapshot.scrollTop < 0 || !isNonEmptyString(snapshot.html)) {
 				throw new Error('The CodeScrim browser track is invalid.');
 			}
 			previousSnapshotTimestamp = snapshot.timestamp;

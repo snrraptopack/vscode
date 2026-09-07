@@ -21,9 +21,6 @@ export interface ICodeScrimBrowserSnapshot {
 	readonly title: string;
 	/** Vertical scroll offset in CSS pixels when the snapshot was taken. */
 	readonly scrollTop: number;
-	/** Instructor viewport used to preserve responsive layout during replay. */
-	readonly viewportWidth?: number;
-	readonly viewportHeight?: number;
 	/** Serialized document, scripts removed. Rendered in a sandboxed iframe at replay. */
 	readonly html: string;
 }

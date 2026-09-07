@@ -18,9 +18,11 @@ const POST_LOAD_CAPTURE_DELAYS_MS = [750, 2000] as const;
 const SNAPSHOT_MAX_PENDING = 1;
 const SNAPSHOT_MIN_INTERVAL_MS = 2000;
 const SNAPSHOT_MAX_HTML_LENGTH = 16 * 1024 * 1024;
+const SNAPSHOT_MAX_PASSIVE_TOTAL_HTML_LENGTH = 48 * 1024 * 1024;
 const SNAPSHOT_MAX_TOTAL_HTML_LENGTH = 64 * 1024 * 1024;
 const SNAPSHOT_MAX_COUNT = 1000;
 const SNAPSHOT_TIMEOUT_MS = 3000;
+const SNAPSHOT_BOUNDARY_TIMEOUT_MS = 10000;
 
 /**
  * Records the instructor Integrated Browser as serialized DOM states plus page
@@ -221,14 +223,14 @@ export class CodeScrimBrowserCapture extends Disposable {
 		const captures: Promise<void>[] = [];
 		for (const model of this.browserWindowService.authorPageModels) {
 			if (model.visible) {
-				captures.push(this.snapshotLimiter.queue(() => this.captureSnapshotNow(model, undefined, timestamp)));
+				captures.push(this.snapshotLimiter.queue(() => this.captureSnapshotNow(model, undefined, timestamp, true)));
 			}
 		}
 		await Promise.all(captures);
 	}
 
 	private captureSnapshot(model: IBrowserViewModel, delayer: ThrottledDelayer<void>): void {
-		if (!this.active || !model.visible || this.disabledSnapshotPages.has(model.id) || this.events.length >= SNAPSHOT_MAX_COUNT) {
+		if (!this.active || !model.visible || this.disabledSnapshotPages.has(model.id) || this.events.length >= SNAPSHOT_MAX_COUNT || this.totalHtmlLength >= SNAPSHOT_MAX_PASSIVE_TOTAL_HTML_LENGTH) {
 			return;
 		}
 		const now = this.position?.() ?? 0;
@@ -242,16 +244,16 @@ export class CodeScrimBrowserCapture extends Disposable {
 			.catch(() => { /* The page or recording was disposed before the trailing capture. */ });
 	}
 
-	private async captureSnapshotNow(model: IBrowserViewModel, generation: number | undefined, timestamp: number): Promise<void> {
+	private async captureSnapshotNow(model: IBrowserViewModel, generation: number | undefined, timestamp: number, boundary = false): Promise<void> {
 		if (this.disabledSnapshotPages.has(model.id) || this.events.length >= SNAPSHOT_MAX_COUNT) {
 			return;
 		}
 		try {
 			let timedOut = false;
-			const snapshot = await raceTimeout(model.captureDomSnapshot(), SNAPSHOT_TIMEOUT_MS, () => timedOut = true);
+			const snapshot = await raceTimeout(model.captureDomSnapshot(), boundary ? SNAPSHOT_BOUNDARY_TIMEOUT_MS : SNAPSHOT_TIMEOUT_MS, () => timedOut = true);
 			if (!snapshot || (generation !== undefined && generation !== this.generation)) {
 				if (timedOut && (generation === undefined || generation === this.generation)) {
-					this.disablePageCapture(model.id, 'the page did not produce a DOM snapshot within the capture deadline');
+					this.logService.warn(`[CodeScrim] Skipped a slow browser DOM snapshot for page ${model.id}; later settled and recording-boundary captures remain enabled.`);
 				}
 				return;
 			}
@@ -265,7 +267,7 @@ export class CodeScrimBrowserCapture extends Disposable {
 			}
 			const scrollTop = Math.max(0, Math.round(snapshot.scrollY));
 			this.recordScroll(model.id, 0, snapshot.scrollY, timestamp);
-			const dataHash = hash(`${snapshot.url}\0${snapshot.title}\0${snapshot.viewportWidth ?? 0}x${snapshot.viewportHeight ?? 0}\0${snapshot.html}`);
+			const dataHash = hash(`${snapshot.url}\0${snapshot.title}\0${snapshot.html}`);
 			if (this.lastSnapshotHash.get(model.id) === dataHash) {
 				return;
 			}
@@ -277,8 +279,6 @@ export class CodeScrimBrowserCapture extends Disposable {
 				url: snapshot.url,
 				title: snapshot.title,
 				scrollTop,
-				...(snapshot.viewportWidth ? { viewportWidth: Math.round(snapshot.viewportWidth) } : {}),
-				...(snapshot.viewportHeight ? { viewportHeight: Math.round(snapshot.viewportHeight) } : {}),
 				html: snapshot.html,
 			}));
 		} catch (error) {

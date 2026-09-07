@@ -5,19 +5,21 @@ open until the exact user flow has been reproduced and verified in a launched
 development build; a source change or unit test alone is not sufficient to close
 it.
 
-## Recording keyboard commands
+## Authoring keyboard commands
 
 **Status:** Fix implemented; awaiting manual regression verification.
 
-While recording, normal editor commands can stop reaching the active editor.
-The problem was first observed with `Ctrl+S`, but `Ctrl+Z` is also affected. This
-means the defect is broader than saving and must be investigated as a focus or
-keybinding-routing regression rather than worked around one command at a time.
+In the CodeScrim authoring workspace, normal editor commands can stop reaching
+the active editor even before recording starts. The problem was first observed
+with `Ctrl+S`, but `Ctrl+Z` is also affected. This means the defect is broader
+than saving and must be treated as a focus or keybinding-routing regression
+rather than worked around one command at a time.
 
 Acceptance criteria:
 
 - The normal workbench implementations of save, undo, redo, copy, paste, find,
-  and other editor keybindings continue to work during recording.
+  and other editor keybindings work both while authoring is idle and during an
+  active recording.
 - Opening, focusing, or using the author browser does not leave keyboard focus in
   an auxiliary document after the instructor returns to the editor.
 - CodeScrim recording observes editor operations without intercepting or replacing
@@ -25,9 +27,10 @@ Acceptance criteria:
 - Automated coverage exercises at least save, undo, and redo through the actual
   keybinding dispatch path while recording is active.
 
-Implementation note: CodeScrim no longer registers a higher-priority `Ctrl+S`
-command. Recording-control actions restore focus to the active editor, leaving
-save, undo, redo, and other shortcuts on the normal workbench dispatch path.
+Implementation note: CodeScrim does not register, capture, redispatch, or replace
+editor keybindings. The native workbench keybinding service remains the only
+owner of keyboard commands in both idle and recording states. CodeScrim restores
+editor focus only after an authoring control is deliberately invoked.
 
 ## Teaching-surface activity indicators
 
@@ -116,7 +119,6 @@ Acceptance criteria:
 - Unsupported cross-origin, canvas, media, or closed-shadow content is identified
   as a bounded fallback region rather than silently distorting the whole page.
 
-Implementation note: new snapshots retain the instructor viewport for responsive
-layout fidelity. Capture now has a timeout, per-snapshot limit, total-HTML budget,
-and event-count ceiling; an abusive page is disabled for further passive capture
-without stopping the interactive recording.
+Implementation note: capture has per-attempt timeouts, a per-snapshot limit,
+a total-HTML budget with space reserved for the final settled state, and an
+event-count ceiling. A slow attempt no longer disables later capture for its tab.

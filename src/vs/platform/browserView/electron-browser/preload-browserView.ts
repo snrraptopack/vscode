@@ -323,7 +323,7 @@ function init() {
 		 * Runs in the isolated world, so page scripts cannot tamper with the
 		 * serialization functions themselves.
 		 */
-		async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string; viewportWidth: number; viewportHeight: number } | undefined> {
+		async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined> {
 			try {
 				const clone = document.documentElement.cloneNode(true) as HTMLElement;
 				const sourceElements = document.documentElement.querySelectorAll('*');
@@ -357,6 +357,7 @@ function init() {
 							element.setAttribute('data-vscode-codescrim-scroll-left', String(source.scrollLeft));
 						}
 					}
+					captureVisibilityState(source, element);
 					markInteractionState(source, element);
 					captureMediaState(source, element);
 				});
@@ -380,8 +381,6 @@ function init() {
 					scrollY: window.scrollY || 0,
 					title: document.title,
 					url: location.href,
-					viewportWidth: Math.max(1, window.innerWidth),
-					viewportHeight: Math.max(1, window.innerHeight),
 				};
 			} catch {
 				return undefined;
@@ -2459,6 +2458,29 @@ function markInteractionState(source: Element, replay: Element): void {
 		} catch {
 			// A browser-specific selector implementation should not invalidate the snapshot.
 		}
+	}
+}
+
+/**
+ * Dynamic sites often hide navigation drawers and overlays through selectors
+ * whose state is owned by JavaScript. Scripts are deliberately removed from a
+ * passive replay, so preserve the source document's resolved hidden state on
+ * the clone instead of allowing those surfaces to become visible by default.
+ */
+function captureVisibilityState(source: Element, replay: Element): void {
+	try {
+		const style = getComputedStyle(source);
+		if (style.display === 'none') {
+			(replay as HTMLElement).style.setProperty('display', 'none', 'important');
+		}
+		if (style.visibility === 'hidden' || style.visibility === 'collapse') {
+			(replay as HTMLElement).style.setProperty('visibility', style.visibility, 'important');
+		}
+		if (style.contentVisibility === 'hidden') {
+			(replay as HTMLElement).style.setProperty('content-visibility', 'hidden', 'important');
+		}
+	} catch {
+		// A non-HTML/SVG element that cannot expose computed style keeps its markup state.
 	}
 }
 

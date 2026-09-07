@@ -774,7 +774,7 @@ export class BrowserView extends Disposable {
 	 * Runs through the preloaded isolated-world API; returns undefined when the
 	 * page is loading or the frame is gone.
 	 */
-	async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string; viewportWidth?: number; viewportHeight?: number } | undefined> {
+	async captureDomSnapshot(): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined> {
 		if (this._view.webContents.isLoading() || this._view.webContents.isDestroyed()) {
 			return undefined;
 		}

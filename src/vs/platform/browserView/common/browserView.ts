@@ -686,7 +686,7 @@ export interface IBrowserViewService {
 	 * Serialize the current DOM state of a browser view's page for passive replay.
 	 * Returns undefined when the page is loading or the frame is gone.
 	 */
-	captureDomSnapshot(id: string): Promise<{ html: string; scrollY: number; title: string; url: string; viewportWidth?: number; viewportHeight?: number } | undefined>;
+	captureDomSnapshot(id: string): Promise<{ html: string; scrollY: number; title: string; url: string } | undefined>;
 
 	/**
 	 * Clear all storage data for the global browser session
